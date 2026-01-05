@@ -1,1 +1,352 @@
+public with sharing class CreateRateContractLineItemController {
+	
+   /* @AuraEnabled
+public static Decimal getProductPrice(Id productId, Id rateContractId) {
 
+    if (productId == null || rateContractId == null) {
+        return null;
+    }
+
+    Rate_Contract__c contract = [
+        SELECT CurrencyIsoCode
+        FROM Rate_Contract__c
+        WHERE Id = :rateContractId
+        LIMIT 1
+    ];
+
+    String currentIsoCode = contract.CurrencyIsoCode;
+    if (String.isBlank(currentIsoCode)) {
+        return null;
+    }
+
+    currentIsoCode = currentIsoCode.trim().toUpperCase();
+
+    // ---------------------------
+    // Step 1: Pick pricebook
+    // ---------------------------
+    Pricebook2 pb;
+
+    if (currentIsoCode == 'EUR') {
+        pb = [
+            SELECT Id
+            FROM Pricebook2
+            WHERE Name LIKE '%EUR%'
+            AND IsActive = TRUE
+            LIMIT 1
+        ];
+    }
+    else if (currentIsoCode == 'USD') {
+        pb = [
+            SELECT Id
+            FROM Pricebook2
+            WHERE Name LIKE '%USD%'
+            AND IsActive = TRUE
+            LIMIT 1
+        ];
+    }
+    else {
+        pb = [
+            SELECT Id
+            FROM Pricebook2
+            WHERE IsStandard = TRUE
+            AND IsActive = TRUE
+            LIMIT 1
+        ];
+    }
+
+    // ---------------------------
+    // Step 2: Try price from selected pricebook
+    // ---------------------------
+    List<PricebookEntry> pbeList = [
+        SELECT UnitPrice, CurrencyIsoCode
+        FROM PricebookEntry
+        WHERE Product2Id = :productId
+        AND Pricebook2Id = :pb.Id
+        AND IsActive = TRUE
+        AND CurrencyIsoCode = :currentIsoCode
+        LIMIT 1
+    ];
+
+    if (!pbeList.isEmpty()) {
+        return pbeList[0].UnitPrice;
+    }
+
+    // ---------------------------
+    // Step 3: Fallback → Standard Pricebook
+    // ---------------------------
+    Pricebook2 standardPb = [
+        SELECT Id
+        FROM Pricebook2
+        WHERE IsStandard = TRUE
+        AND IsActive = TRUE
+        LIMIT 1
+    ];
+
+    List<PricebookEntry> stdPbeList = [
+        SELECT UnitPrice
+        FROM PricebookEntry
+        WHERE Product2Id = :productId
+        AND Pricebook2Id = :standardPb.Id
+        AND IsActive = TRUE
+        AND CurrencyIsoCode = :currentIsoCode
+        LIMIT 1
+    ];
+
+    if (!stdPbeList.isEmpty()) {
+        return stdPbeList[0].UnitPrice;
+    }
+
+    return null;
+}*/
+
+@AuraEnabled
+public static Decimal getProductPrice(Id productId, Id rateContractId) {
+
+    if (productId == null || rateContractId == null) {
+        System.debug('ProductId or RateContractId is null.');
+        return null;
+    }
+
+    // ---------------------------
+    // Step 0: Fetch Rate Contract currency
+    // ---------------------------
+    Rate_Contract__c contract = [
+        SELECT CurrencyIsoCode
+        FROM Rate_Contract__c
+        WHERE Id = :rateContractId
+        LIMIT 1
+    ];
+
+    String currentIsoCode = contract.CurrencyIsoCode;
+    if (String.isBlank(currentIsoCode)) {
+        System.debug('CurrencyIsoCode is blank.');
+        return null;
+    }
+    currentIsoCode = currentIsoCode.trim().toUpperCase();
+    System.debug('CurrencyIsoCode from Rate Contract: ' + currentIsoCode);
+
+    // ---------------------------
+    // Step 1: Fetch Product Code
+    // ---------------------------
+    Product2 prod = [SELECT ProductCode FROM Product2 WHERE Id = :productId LIMIT 1];
+    if (prod.ProductCode == null) {
+        System.debug('ProductCode is null.');
+        return null;
+    }
+    String productCode = prod.ProductCode.trim();
+
+    // ---------------------------
+    // Step 2: Fetch custom Pricebook Line (single SOQL)
+    // ---------------------------
+    List<Pricebook_Lines__c> customPriceList = [
+        SELECT UNIT_COST__c, ITEM_CODE__c, CurrencyIsoCode
+        FROM Pricebook_Lines__c
+        WHERE ITEM_CODE__c = :productCode
+        AND CurrencyIsoCode = :currentIsoCode
+        AND STATUS__c = TRUE
+        AND (START_DATE_ACTIVE__c = null OR START_DATE_ACTIVE__c <= :Date.today())
+        AND (END_DATE_ACTIVE__c = null OR END_DATE_ACTIVE__c >= :Date.today())
+        ORDER BY CreatedDate DESC
+        LIMIT 1
+    ];
+
+    if (!customPriceList.isEmpty()) {
+        System.debug('Returning UnitPrice from custom pricebook line: ' 
+            + customPriceList[0].UNIT_COST__c + ' | Currency: ' + customPriceList[0].CurrencyIsoCode);
+        return customPriceList[0].UNIT_COST__c;
+    }
+
+    System.debug('No active custom price found. Falling back to standard pricebook.');
+
+    // ---------------------------
+    // Step 3: Fallback → Standard Pricebook
+    // ---------------------------
+    Pricebook2 standardPb = [
+        SELECT Id, Name
+        FROM Pricebook2
+        WHERE IsStandard = TRUE
+        AND IsActive = TRUE
+        LIMIT 1
+    ];
+
+    List<PricebookEntry> stdPbeList = [
+        SELECT UnitPrice, CurrencyIsoCode
+        FROM PricebookEntry
+        WHERE Product2Id = :productId
+        AND Pricebook2Id = :standardPb.Id
+        AND IsActive = TRUE
+        AND CurrencyIsoCode = :currentIsoCode
+        LIMIT 1
+    ];
+
+    if (!stdPbeList.isEmpty()) {
+        System.debug('Returning UnitPrice from standard pricebook: ' 
+            + stdPbeList[0].UnitPrice + ' | Currency: ' + stdPbeList[0].CurrencyIsoCode);
+        return stdPbeList[0].UnitPrice;
+    }
+
+    System.debug('No price found for this product in any pricebook.');
+    return null;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+    /*@AuraEnabled(cacheable=true)
+    
+
+        public static List<Product2> searchProducts(String searchTerm) {
+        String term = '%' + searchTerm + '%';
+        return [
+            SELECT Id, Name, ProductCode 
+            FROM Product2 
+            WHERE Name LIKE :term OR ProductCode LIKE :term
+            ORDER BY Name 
+            LIMIT 10
+        ];
+    }*/
+
+
+    @AuraEnabled(cacheable=true)
+public static List<Product2> searchProducts(String searchTerm) {
+    String term = '%' + searchTerm + '%';
+    return [
+        SELECT Id, Name, ProductCode 
+        FROM Product2 
+        WHERE ProductCode LIKE :term OR Name LIKE :term
+        ORDER BY Name
+        LIMIT 100
+    ];
+}
+
+    
+
+
+
+
+	@AuraEnabled(cacheable=true)
+	public static String getRateContractCurrency(Id rateContractId) 
+    {
+        Rate_Contract__c rc = [
+            SELECT CurrencyIsoCode 
+            FROM Rate_Contract__c 
+            WHERE Id = :rateContractId 
+            LIMIT 1
+        ];
+        return rc.CurrencyIsoCode;
+	}
+
+    // @AuraEnabled(cacheable=true)
+    // public static void saveLineItems(Id rateContractId, List<Map<String, Object>> items) {
+    //     List<Rate_Contract_Line_Item__c> lineItemsToInsert = new List<Rate_Contract_Line_Item__c>();
+        
+    //     for (Map<String, Object> item : items) {
+    //         Rate_Contract_Line_Item__c lineItem = new Rate_Contract_Line_Item__c();
+    //         lineItem.Rate_Contract__c = rateContractId;
+    //         lineItem.Product__c = (Id)item.get('productId');
+    //         lineItem.Actual_Price__c = (Decimal)item.get('unitPrice');
+    //         lineItem.Offer_Price_INCO__c = (Decimal)item.get('offerPrice');
+    //         lineItem.INCO_Terms__c = (String)item.get('incoTerms');
+    //         lineItemsToInsert.add(lineItem);
+    //     }
+        
+    //     if (!lineItemsToInsert.isEmpty()) {
+    //         insert lineItemsToInsert;
+    //     }
+    // }
+
+   @AuraEnabled
+public static void createRateContractLineItems(
+    Id rateContractId,
+    List<RateContractLineItemWrapper> items
+) {
+
+    System.debug('🟢 RateContractId = ' + rateContractId);
+    System.debug('🟢 Wrapper Items received = ' + items);
+
+    List<Rate_Contract_Line_Item__c> newRecords = new List<Rate_Contract_Line_Item__c>();
+
+    Integer i = 0;
+    for (RateContractLineItemWrapper w : items) {
+
+        System.debug('🔵 Processing row ' + i);
+        System.debug('Product = ' + w.product);
+        System.debug('NDP = ' + w.ndpExWorks);
+        System.debug('Actual Price = ' + w.actualPrice);
+        System.debug('Offer Price = ' + w.offerPriceINCO);
+        System.debug('INCO Terms = ' + w.incoTerms);
+        System.debug('CurrencyIsoCode = ' + w.currencyIsoCode);
+
+        if (w.product == null) {
+            throw new AuraHandledException(
+                'Product is missing in row ' + (i + 1)
+            );
+        }
+
+        newRecords.add(new Rate_Contract_Line_Item__c(
+            Rate_Contract__c       = rateContractId,
+            Product__c             = (Id) w.product,
+            NDP_Ex_Works__c        = w.ndpExWorks,
+            Actual_Price__c        = w.actualPrice,
+            Offer_Price_INCO__c    = w.offerPriceINCO,
+            Inco_Terms__c          = w.incoTerms,
+            CurrencyIsoCode        = w.currencyIsoCode
+        ));
+
+        i++;
+    }
+
+    System.debug('🟣 Records to insert = ' + newRecords);
+
+    try {
+        insert newRecords;
+    } catch (DmlException e) {
+        System.debug('❌ DML ERROR = ' + e.getMessage());
+        throw new AuraHandledException(e.getMessage());
+    }
+}
+
+
+
+    public class RateContractLineItemWrapper {
+        @AuraEnabled public Integer id { get; set; }
+        @AuraEnabled public String product { get; set; }
+        @AuraEnabled public Decimal ndpExWorks { get; set; }
+        @AuraEnabled public Decimal actualPrice { get; set; }
+        @AuraEnabled public Decimal offerPriceINCO { get; set; }
+        @AuraEnabled public String incoTerms { get; set; }
+        @AuraEnabled public String currencyIsoCode { get; set; }
+
+        // Default constructor
+        public RateContractLineItemWrapper() {}
+
+        // Convenience constructor
+        public RateContractLineItemWrapper(
+            Integer id,
+            String product,
+            Decimal ndpExWorks,
+            Decimal actualPrice,
+            Decimal offerPriceINCO,
+            String incoTerms,
+            String currencyIsoCode
+        ) {
+            this.id = id;
+            this.product = product;
+            this.ndpExWorks = ndpExWorks;
+            this.actualPrice = actualPrice;
+            this.offerPriceINCO = offerPriceINCO;
+            this.incoTerms = incoTerms;
+            this.currencyIsoCode = currencyIsoCode;
+        }
+    }
+
+}
