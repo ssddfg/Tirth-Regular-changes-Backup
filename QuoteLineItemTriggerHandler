@@ -1,0 +1,325 @@
+public class QuoteLineItemTriggerHandler {
+
+    // =====================================================
+    // 1️⃣ HANDLE APPROVAL FLAG
+    // =====================================================
+    public static void handleQuoteApprovalFlag(List<QuoteLineItem> lineItems) {
+        Set<Id> quoteIds = new Set<Id>();
+        for (QuoteLineItem qli : lineItems) {
+            if (qli.QuoteId != null) quoteIds.add(qli.QuoteId);
+        }
+        if (quoteIds.isEmpty()) return;
+
+        Map<Id, List<QuoteLineItem>> quoteLineMap = new Map<Id, List<QuoteLineItem>>();
+        for (QuoteLineItem qli : [SELECT Id, QuoteId, ListPrice, UnitPrice FROM QuoteLineItem WHERE QuoteId IN :quoteIds]) {
+            if (!quoteLineMap.containsKey(qli.QuoteId)) quoteLineMap.put(qli.QuoteId, new List<QuoteLineItem>());
+            quoteLineMap.get(qli.QuoteId).add(qli);
+        }
+
+        List<Quote> quotesToUpdate = new List<Quote>();
+
+        for (Id quoteId : quoteLineMap.keySet()) {
+            Boolean requiresApproval = false;
+            for (QuoteLineItem qli : quoteLineMap.get(quoteId)) {
+                if (qli.ListPrice != null && qli.UnitPrice != null && qli.UnitPrice < qli.ListPrice) {
+                    requiresApproval = true;
+                    break;
+                }
+            }
+            quotesToUpdate.add(new Quote(Id = quoteId, Requires_Approval__c = requiresApproval));
+        }
+
+        if (!quotesToUpdate.isEmpty()) update quotesToUpdate;
+    }
+
+    // =====================================================
+    // 2️⃣ HANDLE FROM_NDP & ALL_FROM_RC FLAG
+    // =====================================================
+    public static void handleFromNDPAndAllFromRC(List<QuoteLineItem> lineItems){
+        if(lineItems.isEmpty()) return;
+
+        Set<Id> quoteIds = new Set<Id>();
+        for(QuoteLineItem qli : lineItems){
+            if(qli.QuoteId != null) quoteIds.add(qli.QuoteId);
+        }
+        if(quoteIds.isEmpty()) return;
+
+        // Fetch QLIs with product and currency details
+        List<QuoteLineItem> qliList = [
+            SELECT Id, QuoteId, UnitPrice, ListPrice, CurrencyIsoCode,
+                   PricebookEntry.CurrencyIsoCode, From_Rate_Contract__c, From_NDP__c,
+                   Product2Id, Product2.RecordType.DeveloperName
+            FROM QuoteLineItem
+            WHERE QuoteId IN :quoteIds
+        ];
+
+        // Group by Quote
+        Map<Id, List<QuoteLineItem>> quoteToQLI = new Map<Id, List<QuoteLineItem>>();
+        for(QuoteLineItem qli : qliList){
+            if(!quoteToQLI.containsKey(qli.QuoteId)) quoteToQLI.put(qli.QuoteId, new List<QuoteLineItem>());
+            quoteToQLI.get(qli.QuoteId).add(qli);
+        }
+
+        String ignoreRT = 'Alternate_BOM';
+        List<QuoteLineItem> qliToUpdate = new List<QuoteLineItem>();
+        List<Quote> quotesToUpdate = new List<Quote>();
+
+        for(Id qId : quoteToQLI.keySet()){
+            Boolean allFromRC = true;
+
+            for(QuoteLineItem qli : quoteToQLI.get(qId)){
+                if(qli.Product2.RecordType.DeveloperName == ignoreRT) continue;
+
+                // NDP logic (only if not RC)
+                Boolean fromNDP = false;
+                if(qli.From_Rate_Contract__c != true){
+                    if(qli.UnitPrice != null &&
+                       qli.UnitPrice == qli.ListPrice &&
+                       qli.CurrencyIsoCode == qli.PricebookEntry.CurrencyIsoCode){
+                        fromNDP = true;
+                    }
+                }
+
+                if(qli.From_NDP__c != fromNDP){
+                    qli.From_NDP__c = fromNDP;
+                    qliToUpdate.add(qli);
+                }
+
+                // All_From_RC check (either From_RC or From_NDP must be true)OLD Code
+                if(qli.From_Rate_Contract__c != true && fromNDP != true){
+                    allFromRC = false;
+                }
+
+                // 🔥 ONLY RC decides All_From_RC-NEW WORKING CODE
+                /*if(qli.From_Rate_Contract__c != true){
+                    allFromRC = false;
+                }*/
+            }
+
+            // Update All_From_RC__c
+            quotesToUpdate.add(new Quote(Id = qId, All_From_RC__c = allFromRC));
+        }
+
+        if(!qliToUpdate.isEmpty()) update qliToUpdate;
+        if(!quotesToUpdate.isEmpty()) update quotesToUpdate;
+    }
+    
+   /* public static void handleFromNDPAndAllFromRC(List<QuoteLineItem> lineItems){
+    System.debug('=== handleFromNDPAndAllFromRC START ===');
+
+    if(lineItems.isEmpty()){
+        System.debug('No line items received');
+        return;
+    }
+
+    Set<Id> quoteIds = new Set<Id>();
+    for(QuoteLineItem qli : lineItems){
+        System.debug('Incoming QLI → Id: ' + qli.Id + ' | QuoteId: ' + qli.QuoteId);
+        if(qli.QuoteId != null) quoteIds.add(qli.QuoteId);
+    }
+
+    System.debug('QuoteIds collected: ' + quoteIds);
+
+    if(quoteIds.isEmpty()){
+        System.debug('No QuoteIds found, exiting');
+        return;
+    }
+
+    List<QuoteLineItem> qliList = [
+        SELECT Id, QuoteId, UnitPrice, ListPrice, CurrencyIsoCode,
+               PricebookEntry.CurrencyIsoCode,
+               From_Rate_Contract__c, From_NDP__c,
+               Product2.RecordType.DeveloperName
+        FROM QuoteLineItem
+        WHERE QuoteId IN :quoteIds
+    ];
+
+    System.debug('Fetched QLI count: ' + qliList.size());
+
+    String ignoreRT = 'Alternate_BOM';
+    List<QuoteLineItem> qliToUpdate = new List<QuoteLineItem>();
+
+    for(QuoteLineItem qli : qliList){
+
+        System.debug('--- Processing QLI ---');
+        System.debug('QLI Id: ' + qli.Id);
+        System.debug('Product RT: ' + qli.Product2.RecordType.DeveloperName);
+        System.debug('UnitPrice: ' + qli.UnitPrice);
+        System.debug('ListPrice: ' + qli.ListPrice);
+        System.debug('CurrencyIsoCode: ' + qli.CurrencyIsoCode);
+        System.debug('PBE Currency: ' + qli.PricebookEntry.CurrencyIsoCode);
+        System.debug('From_RC: ' + qli.From_Rate_Contract__c);
+        System.debug('From_NDP (existing): ' + qli.From_NDP__c);
+
+        if(qli.Product2.RecordType.DeveloperName == ignoreRT){
+            System.debug('Skipping Alternate BOM product');
+            continue;
+        }
+        
+        if(
+        qli.From_Rate_Contract__c == true &&
+        qli.UnitPrice != qli.ListPrice
+    ){
+        System.debug('Price changed for RC product. Clearing RC & NDP flags');
+
+        qli.From_Rate_Contract__c = false;
+        qli.From_NDP__c = false;
+        qliToUpdate.add(qli);
+        continue; // skip NDP logic
+    }
+
+        Boolean fromNDP = false;
+
+        if(qli.From_Rate_Contract__c != true){
+            System.debug('QLI NOT from Rate Contract, checking NDP conditions');
+
+            if(qli.UnitPrice != null &&
+               qli.UnitPrice == qli.ListPrice &&
+               qli.CurrencyIsoCode == qli.PricebookEntry.CurrencyIsoCode){
+
+                fromNDP = true;
+                System.debug('✔ From NDP = TRUE');
+            } else {
+                System.debug('✖ NDP condition failed');
+            }
+        } else {
+            System.debug('QLI marked as From Rate Contract, skipping NDP check');
+        }
+
+        if(qli.From_NDP__c != fromNDP){
+            System.debug('Updating From_NDP__c from ' + qli.From_NDP__c + ' → ' + fromNDP);
+            qli.From_NDP__c = fromNDP;
+            qliToUpdate.add(qli);
+        } else {
+            System.debug('No change required for From_NDP__c');
+        }
+    }
+
+    if(!qliToUpdate.isEmpty()){
+        System.debug('Updating QLI count: ' + qliToUpdate.size());
+        update qliToUpdate;
+    } else {
+        System.debug('No QLI updates required');
+    }
+
+    System.debug('=== handleFromNDPAndAllFromRC END ===');
+}
+*/
+
+
+
+/*
+public static void handleFromNDPAndAllFromRC(List<QuoteLineItem> lineItems){
+    System.debug('⚡ ENTER → handleFromNDPAndAllFromRC | LineItems: ' + lineItems);
+
+    if(lineItems.isEmpty()) return;
+
+    Set<Id> quoteIds = new Set<Id>();
+    for(QuoteLineItem qli : lineItems){
+        if(qli.QuoteId != null) quoteIds.add(qli.QuoteId);
+    }
+    System.debug('📌 QuoteIds Extracted: ' + quoteIds);
+
+    if(quoteIds.isEmpty()) return;
+
+    // Fetch QLIs with product and currency details
+    List<QuoteLineItem> qliList = [
+        SELECT Id, QuoteId, UnitPrice, ListPrice, CurrencyIsoCode,
+               PricebookEntry.CurrencyIsoCode, From_Rate_Contract__c, From_NDP__c,
+               Product2Id, Product2.RecordType.DeveloperName
+        FROM QuoteLineItem
+        WHERE QuoteId IN :quoteIds
+    ];
+
+    System.debug('📥 Loaded QLI Records: ' + qliList);
+
+    // Group by Quote
+    Map<Id, List<QuoteLineItem>> quoteToQLI = new Map<Id, List<QuoteLineItem>>();
+    for(QuoteLineItem qli : qliList){
+        if(!quoteToQLI.containsKey(qli.QuoteId)) quoteToQLI.put(qli.QuoteId, new List<QuoteLineItem>());
+        quoteToQLI.get(qli.QuoteId).add(qli);
+    }
+
+    System.debug('📦 QLI Grouped By Quote: ' + quoteToQLI);
+
+    String ignoreRT = 'Alternate_BOM';
+    List<QuoteLineItem> qliToUpdate = new List<QuoteLineItem>();
+    List<Quote> quotesToUpdate = new List<Quote>();
+
+    // PROCESS EACH QUOTE
+    for(Id qId : quoteToQLI.keySet()){
+        Boolean allFromRC = true;
+        System.debug('-------------------------------');
+        System.debug('🔍 Processing Quote: ' + qId);
+
+        for(QuoteLineItem qli : quoteToQLI.get(qId)){
+
+            System.debug('➡ Checking QLI: ' + qli.Id +
+                         ' | RC=' + qli.From_Rate_Contract__c +
+                         ' | NDP=' + qli.From_NDP__c +
+                         ' | RT=' + qli.Product2.RecordType.DeveloperName);
+
+            // IGNORE Alternate BOM
+            if(qli.Product2.RecordType.DeveloperName == ignoreRT){
+                System.debug('🚫 Ignored (Alternate_BOM) QLI: ' + qli.Id);
+                continue;
+            }
+
+            // ---------------------------
+            // NDP LOGIC
+            // ---------------------------
+            Boolean fromNDP = false;
+
+            if(qli.From_Rate_Contract__c != true){  // Only check NDP if NOT RC
+
+                if(qli.UnitPrice != null &&
+                   qli.UnitPrice == qli.ListPrice &&
+                   qli.CurrencyIsoCode == qli.PricebookEntry.CurrencyIsoCode){
+
+                    fromNDP = true;
+                }
+
+	
+				
+            }
+
+            System.debug('📌 Calculated fromNDP = ' + fromNDP);
+
+            // Update From_NDP__c if needed
+            if(qli.From_NDP__c != fromNDP){
+                System.debug('✏ Updating From_NDP__c for QLI ' + qli.Id + ' → ' + fromNDP);
+                qli.From_NDP__c = fromNDP;
+                qliToUpdate.add(qli);
+            }
+
+            // ---------------------------
+            // All_From_RC LOGIC
+            // ---------------------------
+            // All_From_RC = TRUE only if → every item has RC true
+            // Scenario 2 fix → RC = false should force allFromRC = false
+            if(qli.From_Rate_Contract__c != true){
+                System.debug('❌ RC is FALSE → Setting allFromRC = false');
+                allFromRC = false;
+            }
+        }
+
+        System.debug('🏁 Final All_From_RC__c for Quote ' + qId + ' = ' + allFromRC);
+
+        // Set Quote header flag
+        quotesToUpdate.add(new Quote(Id = qId, All_From_RC__c = allFromRC));
+    }
+
+    if(!qliToUpdate.isEmpty()){
+        System.debug('✏ Updating QLI Records: ' + qliToUpdate);
+        update qliToUpdate;
+    }
+
+    if(!quotesToUpdate.isEmpty()){
+        System.debug('✏ Updating Quote Records: ' + quotesToUpdate);
+        update quotesToUpdate;
+    }
+
+    System.debug('✅ EXIT → handleFromNDPAndAllFromRC');
+}*/
+
+}
