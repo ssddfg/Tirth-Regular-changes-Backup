@@ -1,0 +1,742 @@
+/**
+ * @description: handler class of Quote trigger for Creating Line Items and Making the Opportunity Stage to closed Won
+ * @date: NA
+ * @CreatedDate: 21 Feb, 2025
+ * @author: Swetha S
+ * ********/
+public class QuoteTriggerHandler extends TriggerHandler {
+
+
+
+
+    public class MyCustomException extends Exception{}
+    private List<Quote> newRecords;
+    private Map<Id, Quote> newRecordsMap;
+    private Map<Id, Quote> oldMap;
+
+
+	
+    
+    public quoteTriggerHandler() {
+        System.debug('Inside Trigger');
+        this.newRecords = Trigger.new;
+        this.newRecordsMap = (Map<Id, Quote>) Trigger.newMap;
+        
+         if (Trigger.isUpdate || Trigger.isDelete) {
+            this.oldMap = (Map<Id, Quote>) Trigger.oldMap; // ✅ makes oldMap available
+        }
+    }
+
+    public override void beforeInsert() {
+        System.debug('Inside before insert of Quote');
+        
+        //checkRateContractStatus(this.newRecords);
+        
+        handleBankDetails(this.newRecords);
+        setIncoTermLocationFromAccount(this.newRecords);
+        handleExporterAddress(this.newRecords);
+        setBillAndShipToFromAccount(this.newRecords, null); // ✅ added
+
+    }
+/*public override void beforeUpdate() {
+    System.debug('Inside before update of Quote');
+    handleBankDetails(this.newRecords);
+    handleExporterAddress(this.newRecords);
+}*/
+public override void beforeUpdate() {
+    System.debug('Inside before update of Quote');
+    
+     //checkRateContractStatus(this.newRecords);
+
+    // 1️⃣ General updates for all records
+    handleExporterAddress(this.newRecords); 
+    setIncoTermLocationFromAccount(this.newRecords);
+    setBillAndShipToFromAccount(this.newRecords, this.oldMap); // ✅ added
+
+    // 2️⃣ Only update bank details if Bank__c has changed
+    for (Integer i = 0; i < newRecords.size(); i++) {
+        Quote newQ = newRecords[i];
+        Quote oldQ = (Quote) Trigger.old[i];
+
+		 
+
+        if (newQ.Bank__c != oldQ.Bank__c) {
+            handleBankDetails(new List<Quote>{newQ});
+        }
+    }
+}
+
+    // Need to discuss  - Nathan
+    // public override void afterDelete(){
+    //     Set<Id> oppIds = new Set<Id>();
+    //     for(Quote q : Trigger.old){
+    //         if(q.Status != 'Accepted')
+    //             oppIds.add(q.OpportunityId);
+            
+    //         List<Opportunity> oppList = [SELECT Id FROM Opportunity WHERE Id In : oppIds];
+    //         for(Opportunity opp : oppList){
+    //             opp.IsQuoteAccepted__c  = false;
+    //         }
+
+    //         Update oppList;
+    //     }
+        
+    // }
+
+    // public override void afterInsert(){
+    //     Set<Id> oppIds = new Set<Id>();
+    //     List<QuoteLineItem> qliList = new List<QuoteLineItem>();
+        
+    //     // Collect all related Opportunity IDs from the new Quotes
+    //     for (Quote q : newRecords) {
+    //         if (q.OpportunityId != null) {
+    //             oppIds.add(q.OpportunityId);
+    //         }
+    //     }
+        
+    //     Map<Id, List<OpportunityLineItem>> mapOppIdWithOppProducts = new Map<Id, List<OpportunityLineItem>>();
+    //     for (OpportunityLineItem oli : [SELECT Id, OpportunityId, Product2Id, Quantity, UnitPrice, Discount, Description , PricebookEntryId,Application_Name__c,Product_Group_Name__c,Solution_Name__c,Series_Name__c,Logistics_Instruction__c,Manufacturing_Instruction__c,Additional_Inspection__c
+    //                                 FROM OpportunityLineItem 
+    //                                 WHERE OpportunityId IN :oppIds]) {
+    //         if (!mapOppIdWithOppProducts.containsKey(oli.OpportunityId)) {
+    //             mapOppIdWithOppProducts.put(oli.OpportunityId, new List<OpportunityLineItem>());
+    //         }
+    //         mapOppIdWithOppProducts.get(oli.OpportunityId).add(oli);
+    //     }
+        
+    //     for (Quote q : newRecords) {
+    //         if (q.OpportunityId != null && mapOppIdWithOppProducts.containsKey(q.OpportunityId)) {
+    //             for (OpportunityLineItem oli : mapOppIdWithOppProducts.get(q.OpportunityId)) {
+    //                 QuoteLineItem qli = new QuoteLineItem(
+    //                     QuoteId = q.Id,
+    //                 Product2Id = oli.Product2Id,
+    //                 Quantity = oli.Quantity,
+    //                 UnitPrice = oli.UnitPrice,
+    //                 PricebookEntryId = oli.PricebookEntryId,
+    //                 Discount = oli.Discount,
+    //                 Description = oli.Description,
+    //                 Additional_Inspection__c = oli.Additional_Inspection__c,
+    //                 Logistics_Instruction__c = oli.Logistics_Instruction__c,
+    //                 Manufacturing_Instruction__c = oli.Manufacturing_Instruction__c,
+    //                 Application_Name__c = oli.Application_Name__c,
+    //                 Product_Group_Name__c=oli.Product_Group_Name__c,
+    //                 Solution_Name__c=oli.Solution_Name__c,
+    //                 Series_Name__c=oli.Series_Name__c
+                        
+    //                 );
+    //                 qliList.add(qli);
+    //             }
+    //         }
+    //     }
+        
+    //     if (!qliList.isEmpty()) {
+    //         insert qliList;
+    //     }
+    //     for (Quote q : newRecords) {
+    //     if (q.OpportunityId != null) {
+    //         try {
+    //             OpportunitySchemePopupHelpe.applyOpportunitySchemeToQuote(q.Id);
+    //         } catch (Exception e) {
+    //             System.debug('Failed to map scheme fields to quote ' + q.Id + ': ' + e.getMessage());
+    //         }
+    //     }
+    // }
+    // }
+
+
+
+
+
+
+
+public override void afterInsert() {
+ 
+    System.debug('Executing After Insert');
+ 
+    Set<Id> oppIds = new Set<Id>();
+    Set<Id> accIds = new Set<Id>();
+ 
+    for (Quote q : newRecords) {
+        if (q.OpportunityId != null) oppIds.add(q.OpportunityId);
+    }
+    if (oppIds.isEmpty()) return;
+ 
+    Map<Id, Opportunity> oppMap = new Map<Id, Opportunity>(
+        [SELECT Id, AccountId FROM Opportunity WHERE Id IN :oppIds]
+    );
+ 
+    for (Opportunity opp : oppMap.values()) {
+        if (opp.AccountId != null) accIds.add(opp.AccountId);
+    }
+ 
+    // ===============================
+    // Opportunity Line Items
+    // ===============================
+    Map<Id, List<OpportunityLineItem>> oppIdVsOlis = new Map<Id, List<OpportunityLineItem>>();
+    for (OpportunityLineItem oli : [
+        SELECT Id, OpportunityId, Product2Id, Quantity, UnitPrice, Discount,
+               Description, PricebookEntryId,
+               Application_Name__c, Product_Group_Name__c, Solution_Name__c,
+               Series_Name__c, Logistics_Instruction__c, Manufacturing_Instruction__c,
+               Additional_Inspection__c, Alternate_Product_Name__c,
+               Alternate_Product_Model__c, Parent_Product__c
+        FROM OpportunityLineItem
+        WHERE OpportunityId IN :oppIds
+    ]) {
+        if (!oppIdVsOlis.containsKey(oli.OpportunityId)) {
+            oppIdVsOlis.put(oli.OpportunityId, new List<OpportunityLineItem>());
+        }
+        oppIdVsOlis.get(oli.OpportunityId).add(oli);
+    }
+ 
+    Date quoteDate = Date.today();
+ 
+    // ===============================
+    // Rate Contracts (valid + approved)
+    // ===============================
+    List<Rate_Contract__c> rcList = [
+        SELECT Id, Account__c, INCO_Terms__c, Start_Date__c, End_Date__c, CreatedDate
+        FROM Rate_Contract__c
+        WHERE Account__c IN :accIds
+          AND Is_Active__c = true
+          AND Rate_Contract_Approved__c = 'Approved'
+          AND Start_Date__c <= :quoteDate
+          AND End_Date__c >= :quoteDate
+        ORDER BY CreatedDate DESC
+    ];
+ 
+    Map<String, List<Rate_Contract__c>> rcGroupMap = new Map<String, List<Rate_Contract__c>>();
+    Set<Id> rcIds = new Set<Id>();
+ 
+    for (Rate_Contract__c rc : rcList) {
+        String key = rc.Account__c + '-' + rc.INCO_Terms__c;
+        if (!rcGroupMap.containsKey(key)) {
+            rcGroupMap.put(key, new List<Rate_Contract__c>());
+        }
+        rcGroupMap.get(key).add(rc);
+        rcIds.add(rc.Id);
+    }
+ 
+    // ===============================
+    // RC Line Items (RC → Product)
+    // ===============================
+    Map<Id, Map<Id, Rate_Contract_Line_Item__c>> rcProductMap = new Map<Id, Map<Id, Rate_Contract_Line_Item__c>>();
+    for (Rate_Contract_Line_Item__c rcLi : [
+        SELECT Id, Rate_Contract__c, Product__c, Offer_Price_INCO__c
+        FROM Rate_Contract_Line_Item__c
+        WHERE Rate_Contract__c IN :rcIds
+    ]) {
+        if (!rcProductMap.containsKey(rcLi.Rate_Contract__c)) {
+            rcProductMap.put(rcLi.Rate_Contract__c, new Map<Id, Rate_Contract_Line_Item__c>());
+        }
+        rcProductMap.get(rcLi.Rate_Contract__c).put(rcLi.Product__c, rcLi);
+    }
+ 
+    // ===============================
+    // Create Quote Line Items
+    // ===============================
+    List<QuoteLineItem> qliToInsert = new List<QuoteLineItem>();
+    Map<Id, Integer> oliIdToIndex = new Map<Id, Integer>();
+ 
+    for (Quote q : newRecords) {
+ 
+        List<OpportunityLineItem> olis = oppIdVsOlis.get(q.OpportunityId);
+        if (olis == null) continue;
+ 
+        String rcKey = oppMap.get(q.OpportunityId).AccountId + '-' + q.INCO_Terms__c;
+        List<Rate_Contract__c> rcCandidates = rcGroupMap.get(rcKey);
+ 
+        for (OpportunityLineItem oli : olis) {
+ 
+            Rate_Contract_Line_Item__c matchedRcLi;
+ 
+            if (rcCandidates != null) {
+                for (Rate_Contract__c rc : rcCandidates) {
+                    if (rcProductMap.containsKey(rc.Id)
+                        && rcProductMap.get(rc.Id).containsKey(oli.Product2Id)) {
+ 
+                        matchedRcLi = rcProductMap.get(rc.Id).get(oli.Product2Id);
+                        break; // latest RC wins
+                    }
+                }
+            }
+ 
+            QuoteLineItem qli = new QuoteLineItem(
+                QuoteId = q.Id,
+                Product2Id = oli.Product2Id,
+                Quantity = oli.Quantity,
+                PricebookEntryId = oli.PricebookEntryId,
+                Discount = oli.Discount,
+                Description = oli.Description,
+                Additional_Inspection__c = oli.Additional_Inspection__c,
+                Logistics_Instruction__c = oli.Logistics_Instruction__c,
+                Manufacturing_Instruction__c = oli.Manufacturing_Instruction__c,
+                Application_Name__c = oli.Application_Name__c,
+                Product_Group_Name__c = oli.Product_Group_Name__c,
+                Solution_Name__c = oli.Solution_Name__c,
+                Series_Name__c = oli.Series_Name__c,
+                Alternate_Product_Name__c = oli.Alternate_Product_Name__c,
+                Alternate_Product_Model__c = oli.Alternate_Product_Model__c
+            );
+ 
+            if (matchedRcLi != null && matchedRcLi.Offer_Price_INCO__c != null) {
+                qli.UnitPrice = matchedRcLi.Offer_Price_INCO__c;
+                qli.From_Rate_Contract__c = true;
+            } else {
+                qli.UnitPrice = oli.UnitPrice;   // ✅ fallback
+                qli.From_Rate_Contract__c = false;
+            }
+ 
+            oliIdToIndex.put(oli.Id, qliToInsert.size());
+            qliToInsert.add(qli);
+        }
+    }
+ 
+    if (!qliToInsert.isEmpty()) insert qliToInsert;
+ 
+    // ===============================
+    // Parent–Child QLI Mapping
+    // ===============================
+    List<QuoteLineItem> qliToUpdate = new List<QuoteLineItem>();
+ 
+    for (Quote q : newRecords) {
+        List<OpportunityLineItem> olis = oppIdVsOlis.get(q.OpportunityId);
+        if (olis == null) continue;
+ 
+        for (OpportunityLineItem oli : olis) {
+            if (oli.Parent_Product__c != null
+                && oliIdToIndex.containsKey(oli.Parent_Product__c)) {
+ 
+                Integer childIdx = oliIdToIndex.get(oli.Id);
+                Integer parentIdx = oliIdToIndex.get(oli.Parent_Product__c);
+ 
+                if (childIdx != null && parentIdx != null) {
+                    qliToInsert[childIdx].Parent_Quote_Line_Item__c =
+                        qliToInsert[parentIdx].Id;
+                    qliToUpdate.add(qliToInsert[childIdx]);
+                }
+            }
+        }
+    }
+ 
+    if (!qliToUpdate.isEmpty()) update qliToUpdate;
+}
+
+
+
+
+
+
+
+
+
+
+    
+    // public override void afterUpdate() {
+    //     Set<Id> oppIds = new Set<Id>();
+    //     List<Quote> oldRecords = (List<Quote>) Trigger.old;
+    //     Map<Id, Quote> oldMap = new Map<Id, Quote>(oldRecords);
+
+        
+    //     // for (Quote q : newRecords) {
+    //     //     if (q.Status == 'Accepted' && q.OpportunityId != null) {
+    //     //         oppIds.add(q.OpportunityId);
+    //     //     }
+    //     // }
+    //     for (Quote q : newRecords) {
+    //         // Check if the status changed to 'Accepted'
+    //         if (q.Status == 'Accepted' && oldMap.get(q.Id).Status != 'Accepted' && q.OpportunityId != null) {
+    //             oppIds.add(q.OpportunityId);
+    //         }
+    //     }
+
+        
+    //     if (oppIds.isEmpty()) {
+    //         return;
+    //     }
+        
+    //     List<Opportunity> oppList = [SELECT Id, StageName FROM Opportunity WHERE Id IN :oppIds];
+        
+    //     for (Opportunity opp : oppList) {
+    //         opp.IsQuoteAccepted__c = TRUE;
+    //     }
+        
+    //     if (!oppList.isEmpty()) {
+    //         update oppList;
+    //     }
+    // }
+
+   
+
+public override void afterUpdate() {
+        Set<Id> rejectedOppIds = new Set<Id>();
+        Set<Id> oppIds = new Set<Id>();
+
+
+        for(Quote q : newRecords){
+            if(q.Status == 'Rejected' || q.Status == 'Denied (Internal)'){
+                rejectedOppIds.add(q.OpportunityId);
+            } else {
+                oppIds.add(q.OpportunityId);
+            }
+        }
+
+        List<Opportunity> rejectedOpps = [SELECT Id, IsQuoteAccepted__c FROM Opportunity WHERE Id In: rejectedOppIds Limit 1];
+        List<Opportunity> opps = [SELECT Id, IsQuoteAccepted__c FROM Opportunity WHERE Id In: oppIds Limit 1];
+
+        for(Opportunity opp : opps){
+            opp.IsQuoteAccepted__c = TRUE;
+        }
+
+        for(Opportunity opp : rejectedOpps){
+            opp.IsQuoteAccepted__c = FALSE;
+        }
+
+        opps.addAll(rejectedOpps);
+        if(!opps.isEmpty()){
+            Update opps;
+        }
+
+        // Call the calculation logic
+        new InclusiveHeaderPricingCalculation(newRecordsMap.keySet()).calculateInclusiveHeaderPricing();
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+    
+
+    public static void handleBankDetails(List<Quote> quoteList) {
+        // Get all Bank Details metadata
+        List<Bank_Detail__mdt> bankDetailRecords = [
+            SELECT Label, BANK_NAME__c, BENEFICIARY_NAME__c, BANK_ADDRESS__c,
+                ACCOUNT_NUMBER__c, IFSC_CODE__c, MICR_CODE__c, SWIFT_CODE__c,   
+                Street__c, City__c, Zip_Postal_Code__c, State_Province_Code__c, Country_Territory_Code__c 
+            FROM Bank_Detail__mdt
+        ];
+
+        System.debug('bankDetailRecords: '+ bankDetailRecords);
+
+        // Map Label to Bank Detail
+        Map<String, Bank_Detail__mdt> labelToBankDetailMap = new Map<String, Bank_Detail__mdt>();
+        for (Bank_Detail__mdt bd : bankDetailRecords) {
+            labelToBankDetailMap.put(bd.Label, bd);
+        }
+
+        System.debug('labelToBankDetailMap: '+ labelToBankDetailMap);
+
+        // Loop through Quotes and populate Bank details
+        for (Quote q : quoteList) {
+            if (q.Bank__c != null) {
+                Bank_Detail__mdt selectedBank = labelToBankDetailMap.get(q.Bank__c);
+                if (selectedBank != null) {
+                    q.Bank_Name__c = selectedBank.BANK_NAME__c;
+                    q.Bank_Beneficiary_Name__c = selectedBank.BENEFICIARY_NAME__c;
+                    q.Account_Number__c = selectedBank.ACCOUNT_NUMBER__c;
+                    q.IFSC_Code__c = selectedBank.IFSC_CODE__c;
+                    q.MICR_Code__c = selectedBank.MICR_CODE__c;
+                    q.Swift_Code__c = selectedBank.SWIFT_CODE__c;
+                    q.Bank_Address__City__s = selectedBank.City__c;
+                    q.Bank_Address__PostalCode__s = selectedBank.Zip_Postal_Code__c;
+                    q.Bank_Address__Street__s = selectedBank.Street__c;
+                    q.Bank_Address__CountryCode__s = selectedBank.Country_Territory_Code__c;
+                    q.Bank_Address__StateCode__s = selectedBank.State_Province_Code__c;
+                }
+            }
+        }
+
+        System.debug('quoteList: '+ quoteList);
+    }
+
+
+    public static void setIncoTermLocationFromAccount(List<Quote> quoteList) {
+        System.debug('Inside setIncoTermLocationFromAccount on Quote Trigger Handler');
+
+        Set<Id> opportunityIds = new Set<Id>();
+        for (Quote q : quoteList) {
+            if (q.OpportunityId != null) {
+                opportunityIds.add(q.OpportunityId);
+            }
+        }
+
+        System.debug('Opportunity Ids: ' + opportunityIds);
+
+        if (!opportunityIds.isEmpty()) {
+            Map<Id, Opportunity> oppMap = new Map<Id, Opportunity>(
+                [SELECT Id, AccountId, Account.Incoterms_Location_1__c 
+                FROM Opportunity 
+                WHERE Id IN :opportunityIds]
+            );
+
+           /* for (Quote q : quoteList) {
+                if (q.OpportunityId != null && oppMap.containsKey(q.OpportunityId)) {
+                    Opportunity opp = oppMap.get(q.OpportunityId);
+                    if (opp.Account != null) {
+                        q.Incoterms_Location__c = opp.Account.Incoterms_Location_1__c;
+                        System.debug('Setting Quote Inco Term Location to: ' + q.Incoterms_Location__c);
+                    }
+                }
+            }*/
+
+				for (Quote q : quoteList) {
+    if (q.OpportunityId != null && oppMap.containsKey(q.OpportunityId)) {
+
+        Opportunity opp = oppMap.get(q.OpportunityId);
+
+        if (opp.Account != null) {
+
+            // Only update if Quote field is blank
+            if (String.isBlank(q.Incoterms_Location__c)) {
+                q.Incoterms_Location__c = opp.Account.Incoterms_Location_1__c;
+                System.debug('Quote Incoterm blank — Setting from Account: ' + q.Incoterms_Location__c);
+            } else {
+                System.debug('Quote Incoterm already set — Keeping quote value: ' + q.Incoterms_Location__c);
+            }
+
+        }
+    }
+}
+        }
+    }
+
+    public static void handleExporterAddress(List<Quote> quoteList) {
+        // Fetch all Exporter Address metadata
+        List<Exporter_Address__mdt> exporterAddressRecords = [
+            SELECT Label, City__c, Country__c, Email__c, Exporter_Address__c, 
+                Postal_Code__c, State__c, Street__c, Website__c,CIN__c
+            FROM Exporter_Address__mdt
+        ];
+        
+        System.debug('exporterAddressRecords: ' + exporterAddressRecords);
+
+        // Map Label to Exporter Address metadata
+        Map<String, Exporter_Address__mdt> labelToExporterAddressMap = new Map<String, Exporter_Address__mdt>();
+        for (Exporter_Address__mdt ea : exporterAddressRecords) {
+            labelToExporterAddressMap.put(ea.Label, ea);
+        }
+
+        System.debug('labelToExporterAddressMap: ' + labelToExporterAddressMap);
+
+        // Loop through Quotes and populate Exporter Address based on Unit__c picklist
+        for (Quote q : quoteList) {
+            if (q.Unit__c != null) {
+                Exporter_Address__mdt selectedAddress = labelToExporterAddressMap.get(q.Unit__c);
+                if (selectedAddress != null) {
+                    // Populate Address compound field
+                    q.Exporter__Street__s     = selectedAddress.Street__c;
+                    q.Exporter__City__s       = selectedAddress.City__c;
+                    q.Exporter__PostalCode__s = selectedAddress.Postal_Code__c;
+                    q.Exporter__StateCode__s  = selectedAddress.State__c;
+                    q.Exporter__CountryCode__s= selectedAddress.Country__c;
+
+                    // Optionally populate other related fields
+                    q.Email   = selectedAddress.Email__c;
+                    q.Website__c = selectedAddress.Website__c;
+                    q.CIN__c=selectedAddress.CIN__c;
+                    q.fieldVisibility__c = true;
+                }
+            }
+        }
+
+        System.debug('quoteList after exporter address population: ' + quoteList);
+    }
+
+	
+
+
+
+	public static void setBillAndShipToFromAccount(List<Quote> quoteList, Map<Id, Quote> oldMap) {
+    Set<Id> accIds = new Set<Id>();
+    Set<Id> oppIds = new Set<Id>();
+    Map<Id, Id> oppToAccountMap = new Map<Id, Id>();
+
+    // Collect AccountIds directly or via Opportunity
+    for (Quote q : quoteList) {
+        Quote oldQ = oldMap != null ? oldMap.get(q.Id) : null;
+        Boolean isAccountChanged = oldQ == null || (oldQ.AccountId != q.AccountId);
+
+        if (isAccountChanged) {
+            if (q.AccountId != null) {
+                accIds.add(q.AccountId);
+            } else if (q.OpportunityId != null) {
+                oppIds.add(q.OpportunityId);
+            }
+        }
+    }
+
+    // 🔹 If Quotes are created from Opportunity, fetch related Accounts
+    if (!oppIds.isEmpty()) {
+        for (Opportunity opp : [
+            SELECT Id, AccountId 
+            FROM Opportunity 
+            WHERE Id IN :oppIds
+        ]) {
+            if (opp.AccountId != null) {
+                accIds.add(opp.AccountId);
+                oppToAccountMap.put(opp.Id, opp.AccountId);
+            }
+        }
+    }
+
+    if (accIds.isEmpty()) return;
+
+    // 🔹 Query Accounts with Customer Number
+    Map<Id, Account> accMap = new Map<Id, Account>(
+        [SELECT Id, Customer_Number__c FROM Account WHERE Id IN :accIds]
+    );
+
+    // 🔹 Set Bill_To_Party__c and Ship_To_Party__c safely
+    for (Quote q : quoteList) {
+        Id accId = q.AccountId;
+
+        // derive from Opportunity (only in-memory)
+        if (accId == null && q.OpportunityId != null && oppToAccountMap.containsKey(q.OpportunityId)) {
+            accId = oppToAccountMap.get(q.OpportunityId);
+        }
+
+        if (accId != null && accMap.containsKey(accId)) {
+            Account acc = accMap.get(accId);
+            if (acc.Customer_Number__c != null) {
+                if (q.Bill_To_Party__c == null)
+                    q.Bill_To_Party__c = acc.Customer_Number__c;
+                if (q.Ship_To_Party__c == null)
+                    q.Ship_To_Party__c = acc.Customer_Number__c;
+            }
+        }
+    }
+}
+
+
+
+//WORKING CODE
+
+/*public static void checkRateContractStatus(List<Quote> quoteList){
+
+    Set<Id> quoteIds = new Set<Id>();
+
+    for(Quote q : quoteList){
+        if(q.Id != null){
+            quoteIds.add(q.Id);
+        }
+    }
+
+    if(quoteIds.isEmpty()){
+        return;
+    }
+
+    // 1️⃣ Fetch Quote Line Items WITH Product RecordType DeveloperName
+    List<QuoteLineItem> qliList = [
+        SELECT Id, QuoteId, Product2Id, From_Rate_Contract__c,
+               Product2.RecordType.DeveloperName
+        FROM QuoteLineItem
+        WHERE QuoteId IN :quoteIds
+    ];
+
+    // Map Quote → QLI
+    Map<Id, List<QuoteLineItem>> quoteToQLI = new Map<Id, List<QuoteLineItem>>();
+
+    for(QuoteLineItem qli : qliList){
+        if(!quoteToQLI.containsKey(qli.QuoteId)){
+            quoteToQLI.put(qli.QuoteId, new List<QuoteLineItem>());
+        }
+        quoteToQLI.get(qli.QuoteId).add(qli);
+    }
+
+    // DeveloperName to ignore
+    String ignoreRT = 'Alternate_BOM';
+
+    // 2️⃣ Final Logic
+    for(Quote q : quoteList){
+
+        if(!quoteToQLI.containsKey(q.Id)){
+            q.All_From_RC__c = false;
+            continue;
+        }
+
+        Boolean allFromRC = true;
+
+        for(QuoteLineItem qli : quoteToQLI.get(q.Id)){
+
+            // 🚫 Ignore RT: Alternate_BOM
+            if(qli.Product2.RecordType.DeveloperName == ignoreRT){
+                continue;
+            }
+
+            // Check normal products
+            if(qli.From_Rate_Contract__c != true){
+                allFromRC = false;
+                break;
+            }
+        }
+
+        q.All_From_RC__c = allFromRC;
+    }
+}
+
+
+//NEW CODE
+
+/*
+public static void checkRateContractStatus(List<Quote> quoteList){
+
+    Set<Id> quoteIds = new Set<Id>();
+    for(Quote q : quoteList){
+        if(q.Id != null){
+            quoteIds.add(q.Id);
+        }
+    }
+    if(quoteIds.isEmpty()) return;
+
+    // Fetch QLIs with Product RT
+    List<QuoteLineItem> qliList = [
+        SELECT Id, QuoteId, Product2Id, From_Rate_Contract__c, From_NDP__c,
+               Product2.RecordType.DeveloperName
+        FROM QuoteLineItem
+        WHERE QuoteId IN :quoteIds
+    ];
+
+    Map<Id, List<QuoteLineItem>> quoteToQLI = new Map<Id, List<QuoteLineItem>>();
+    for(QuoteLineItem qli : qliList){
+        if(!quoteToQLI.containsKey(qli.QuoteId)){
+            quoteToQLI.put(qli.QuoteId, new List<QuoteLineItem>());
+        }
+        quoteToQLI.get(qli.QuoteId).add(qli);
+    }
+
+    String ignoreRT = 'Alternate_BOM';
+
+    for(Quote q : quoteList){
+        if(!quoteToQLI.containsKey(q.Id)){
+            q.All_From_RC__c = false;
+            continue;
+        }
+
+        Boolean allFromRC = true;
+
+        for(QuoteLineItem qli : quoteToQLI.get(q.Id)){
+
+            if(qli.Product2.RecordType.DeveloperName == ignoreRT) continue;
+
+            // ✅ Updated logic to handle all 4 scenarios
+            if(qli.From_Rate_Contract__c == false && qli.From_NDP__c == false){
+                allFromRC = false;
+                break; // if any QLI fails, quote should be false
+            }
+        }
+
+        q.All_From_RC__c = allFromRC;
+    }
+}*/
+
+
+
+}
