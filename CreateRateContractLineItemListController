@@ -1,0 +1,139 @@
+public with sharing class CreateRateContractLineItemListController {
+	
+    @AuraEnabled()
+	public static Decimal getProductPrice(Id productId, Id rateContractId) {
+        System.debug('Product ID: ' + productId);
+        System.debug('Rate Contract ID: ' + rateContractId);
+        if (productId == null || rateContractId == null) {
+			return null;
+		}
+
+        Rate_Contract__c contract = [SELECT Id, CurrencyIsoCode FROM Rate_Contract__c WHERE Id = :rateContractId LIMIT 1];
+        String currentIsoCode = contract.CurrencyIsoCode;
+
+        if (currentIsoCode == null) {
+			return null;
+		}
+
+        System.debug('Current ISO Code: ' + currentIsoCode);
+
+		PricebookEntry priceBookEntry = [SELECT Id, CurrencyIsoCode, UnitPrice FROM PricebookEntry WHERE Product2Id = :productId AND Pricebook2.IsStandard = true AND IsActive = true AND CurrencyIsoCode = :currentIsoCode LIMIT 1];
+        if (priceBookEntry == null) {
+            return null;
+        }
+
+        System.debug('Price Book Entry Currency ISO Code: ' + priceBookEntry.CurrencyIsoCode);
+        System.debug('Unit Price: ' + priceBookEntry.UnitPrice);
+
+		return priceBookEntry.UnitPrice;
+	}
+
+
+	@AuraEnabled(cacheable=true)
+	public static String getRateContractCurrency(Id rateContractId) 
+    {
+        Rate_Contract__c rc = [
+            SELECT CurrencyIsoCode 
+            FROM Rate_Contract__c 
+            WHERE Id = :rateContractId 
+            LIMIT 1
+        ];
+        return rc.CurrencyIsoCode;
+	}
+
+    /*@AuraEnabled
+public static ProductPriceWrapper getProductDetails(Id productId, Id rateContractId) {
+
+    ProductPriceWrapper wrap = new ProductPriceWrapper();
+
+    Rate_Contract__c contract = [
+        SELECT CurrencyIsoCode
+        FROM Rate_Contract__c
+        WHERE Id = :rateContractId
+        LIMIT 1
+    ];
+
+    PricebookEntry pbe = [
+        SELECT UnitPrice, Product2.ProductCode
+        FROM PricebookEntry
+        WHERE Product2Id = :productId
+        AND Pricebook2.IsStandard = true
+        AND IsActive = true
+        AND CurrencyIsoCode = :contract.CurrencyIsoCode
+        LIMIT 1
+    ];
+
+    wrap.unitPrice = pbe.UnitPrice;
+    wrap.productCode = pbe.Product2.ProductCode;
+
+    return wrap;
+}*/
+
+
+@AuraEnabled
+public static ProductPriceWrapper getProductDetails(Id productId, Id rateContractId) {
+    ProductPriceWrapper wrap = new ProductPriceWrapper();
+
+    // Step 1: Get the Rate Contract currency
+    Rate_Contract__c contract = [
+        SELECT CurrencyIsoCode 
+        FROM Rate_Contract__c 
+        WHERE Id = :rateContractId 
+        LIMIT 1
+    ];
+    String currentIsoCode = contract.CurrencyIsoCode;
+
+    // Step 2: Get Product Code
+    Product2 prod = [
+        SELECT ProductCode 
+        FROM Product2 
+        WHERE Id = :productId 
+        LIMIT 1
+    ];
+    String productCode = prod.ProductCode;
+
+    // Step 3: Try fetching custom price from Pricebook_Lines__c
+    List<Pricebook_Lines__c> customPriceList = [
+        SELECT UNIT_COST__c
+        FROM Pricebook_Lines__c
+        WHERE ITEM_CODE__c = :productCode
+        AND CurrencyIsoCode = :currentIsoCode
+        AND STATUS__c = TRUE
+        AND (START_DATE_ACTIVE__c = null OR START_DATE_ACTIVE__c <= :Date.today())
+        AND (END_DATE_ACTIVE__c = null OR END_DATE_ACTIVE__c >= :Date.today())
+        ORDER BY CreatedDate DESC
+        LIMIT 1
+    ];
+
+    if (!customPriceList.isEmpty()) {
+        wrap.unitPrice = customPriceList[0].UNIT_COST__c;
+        wrap.productCode = productCode;
+        return wrap;
+    }
+
+    // Step 4: Fallback → Standard Pricebook
+    PricebookEntry pbe = [
+        SELECT UnitPrice, Product2.ProductCode 
+        FROM PricebookEntry
+        WHERE Product2Id = :productId
+        AND Pricebook2.IsStandard = TRUE
+        AND IsActive = TRUE
+        AND CurrencyIsoCode = :currentIsoCode
+        LIMIT 1
+    ];
+
+    wrap.unitPrice = pbe.UnitPrice;
+    wrap.productCode = pbe.Product2.ProductCode;
+
+    return wrap;
+}
+
+
+
+    public class ProductPriceWrapper {
+    @AuraEnabled public Decimal unitPrice;
+    @AuraEnabled public String productCode;
+}
+
+
+}
