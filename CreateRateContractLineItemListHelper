@@ -1,0 +1,18 @@
+public with sharing class CreateRateContractLineItemListHelper {
+    @AuraEnabled
+    public static void saveLineItems(Id rateContractId, List<Object> items) {
+        List<Rate_Contract_Line_Item__c> toInsert = new List<Rate_Contract_Line_Item__c>();
+
+        for (Object obj : items) {
+            Map<String, Object> row = (Map<String, Object>)obj;
+            toInsert.add(new Rate_Contract_Line_Item__c(
+                Rate_Contract__c = rateContractId,
+                Product__c = (Id)row.get('productId'),
+               // Quantity__c = (Decimal)row.get('quantity'),
+                NDP_Ex_works__c = (Decimal)row.get('unitPrice')
+                //TotalPrice__c = (Decimal)row.get('totalPrice')
+            ));
+        }
+        insert toInsert;
+    }
+}
