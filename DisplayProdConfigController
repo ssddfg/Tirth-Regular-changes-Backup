@@ -1,0 +1,960 @@
+public without sharing class DisplayProdConfigController {
+/*
+@AuraEnabled
+public static void updateQuoteField(Id quoteId, Boolean allFromRC) {
+    Quote q = [SELECT Id, All_From_RC__c FROM Quote WHERE Id = :quoteId LIMIT 1];
+    q.All_From_RC__c = allFromRC;
+    update q;
+}*/
+    // @AuraEnabled
+    // public static List<OLI_Wrapper> fetchDetails(String recordId) {
+        //     try {
+            //         System.debug('record Id :: ' + recordId);
+            //         String objectType = Id.valueOf(recordId).getSObjectType().getDescribe().getName();
+            //         System.debug('Object Type :: ' + objectType);
+            //         // Step 1: Fetch all OLI records
+            //         List<OpportunityLineItem> oppProductList = [
+            //             SELECT Id, Product2Id, Product2.Parent_Product__c, Quantity, ListPrice, TotalPrice, UnitPrice, Product2.Name, Product2.RecordType.Name, Product2.Product_Type__c,
+            //             Solution_Name__c, Application_Name__c
+            //             FROM OpportunityLineItem
+            //             WHERE OpportunityId =: recordId
+            //         ];
+            
+            //         System.debug('oppProductList :: '  + oppProductList);
+            
+            //         Set<Id> productIds = new Set<Id>(); // Store all product Ids
+            //         Map<Id, OpportunityLineItem> prodIdVsOLIMap = new Map<Id, OpportunityLineItem>(); // Map Product -> OLI
+            //         Map<Id, List<ALT_BOM>> parentProductToAltBomMap = new Map<Id, List<ALT_BOM>>(); // Parent Product -> Alt BOM List
+            
+            //         for (OpportunityLineItem oli : oppProductList) {
+                //             productIds.add(oli.Product2Id);
+                //             prodIdVsOLIMap.put(oli.Product2Id, oli);
+                
+                //             // Handle Parent-Child BOM relationships
+                //             if (oli.Product2.Parent_Product__c != null) {
+                    //                 Id parentProductId = oli.Product2.Parent_Product__c;
+                    //                 ALT_BOM altBOM = new ALT_BOM();
+                    //                 altBOM.Id = oli.Id;
+                    //                 altBOM.ProductName = oli.Product2.Name;
+                    //                 altBOM.Quantity = String.valueOf(oli.Quantity);
+                    //                 altBOM.Price = String.valueOf(oli.UnitPrice);
+                    
+                    //                 if (!parentProductToAltBomMap.containsKey(parentProductId)) {
+                        //                     parentProductToAltBomMap.put(parentProductId, new List<ALT_BOM>());
+                    //                 }
+                    //                 parentProductToAltBomMap.get(parentProductId).add(altBOM);
+                //             }
+            //         }
+            
+            //         // Step 2: Fetch all ProductConfigurator records for these products
+            //         List<Product_Configurator__c> primaryProdConfigs = [
+            //             SELECT Id, Product__c, Product__r.Name, Product_Category_Type__c, Parent_Product_Configurator__c
+            //             FROM Product_Configurator__c
+            //             WHERE Product__c IN :productIds
+            //         ];
+            
+            //         Map<Id, Product_Configurator__c> pcMap = new Map<Id, Product_Configurator__c>(); // Store all PC records
+            //         Set<Id> parentPCIds = new Set<Id>(); // Track parents that need fetching
+            
+            //         for (Product_Configurator__c pc : primaryProdConfigs) {
+                //             pcMap.put(pc.Id, pc);
+                //             if (pc.Parent_Product_Configurator__c != null) {
+                    //                 parentPCIds.add(pc.Parent_Product_Configurator__c);
+                //             }
+            //         }
+            
+            //         // Step 3: Fetch all ancestors in the hierarchy
+            //         while (!parentPCIds.isEmpty()) {
+                //             List<Product_Configurator__c> tempProdConfigList = [
+                //                 SELECT Id, Product__c, Product__r.Name, Product_Category_Type__c, Parent_Product_Configurator__c
+                //                 FROM Product_Configurator__c
+                //                 WHERE Id IN :parentPCIds
+                //             ];
+                
+                //             parentPCIds.clear();
+                //             for (Product_Configurator__c parentPc : tempProdConfigList) {
+                    //                 if (!pcMap.containsKey(parentPc.Id)) {
+                        //                     pcMap.put(parentPc.Id, parentPc);
+                        //                     if (parentPc.Parent_Product_Configurator__c != null) {
+                            //                         parentPCIds.add(parentPc.Parent_Product_Configurator__c);
+                        //                     }
+                    //                 }
+                //             }
+            //         }
+            
+            //         // Step 4: Map Product2Id to its lowest-level ProductConfigurator
+            //         Map<Id, Product_Configurator__c> productToPCMap = new Map<Id, Product_Configurator__c>();
+            //         for (Product_Configurator__c pc : primaryProdConfigs) {
+                //             productToPCMap.put(pc.Product__c, pc);
+            //         }
+            
+            //         // Step 5: Create OLI Wrappers and populate Alt BOMs
+            //         List<OLI_Wrapper> oliWrapperList = new List<OLI_Wrapper>();
+            
+            //         for (OpportunityLineItem oli : oppProductList) {
+                //             // If this is a child OLI, it belongs to a parent and should not be a separate wrapper
+                //             if (oli.Product2.Parent_Product__c != null) {
+                    //                 continue; // Skip child products since they're already in AltBOM list
+                //             }
+                
+                //             // Create main OLI Wrapper
+                //             OLI_Wrapper wrapper = new OLI_Wrapper();
+                //             wrapper.Id = oli.Id;
+                //             wrapper.ProductName = oli.Product2.Name;
+                //             wrapper.Quantity = String.valueOf(oli.Quantity);
+                //             wrapper.Price = String.valueOf(oli.UnitPrice);
+                //             wrapper.ProductGroup = oli.Product2.Product_Type__c;
+                //             wrapper.ProductType = oli.Product2.RecordType.Name;
+                //             wrapper.CropSolution = oli.Solution_Name__c;
+                //             if(oli.Product2.RecordType.Name == 'Spares')
+                //                 wrapper.ProductGroup = 'Spares';
+                //             wrapper.Application = oli.Application_Name__c;
+                //             wrapper.SoilType = oli.Solution_Name__c;
+                
+                //             // Fetch the lowest-level ProductConfigurator
+                //             Product_Configurator__c pc = productToPCMap.get(oli.Product2Id);
+                
+                //             // Traverse the hierarchy upwards to populate CropSolution, Application, Solution
+                //             // while (pc != null) {
+                    //                 //     if (pc.Product_Category_Type__c == 'Crop Solution' && wrapper.CropSolution == null) {
+                        //                     //         wrapper.CropSolution = pc.Product__r.Name;
+                    //                 //     } else if (pc.Product_Category_Type__c == 'Application' && wrapper.Application == null) {
+                        //                     //         wrapper.Application = pc.Product__r.Name;
+                    //                 //     } else if (pc.Product_Category_Type__c == 'Solution' && wrapper.Solution == null) {
+                        //                     //         wrapper.Solution = pc.Product__r.Name;
+                    //                 //     }
+                    
+                    //                 //     // Move up the hierarchy
+                    //                 //     pc = pcMap.get(pc.Parent_Product_Configurator__c);
+                //             // }
+                
+                //             // Attach Alt BOMs if any exist
+                //             if (parentProductToAltBomMap.containsKey(oli.Product2Id)) {
+                    //                 wrapper.altBOMList = parentProductToAltBomMap.get(oli.Product2Id);
+                //             } else {
+                    //                 wrapper.altBOMList = new List<ALT_BOM>();
+                //             }
+                
+                //             oliWrapperList.add(wrapper);
+            //         }
+            
+            //         System.debug('oliWrapperList :: ' + oliWrapperList);
+            //         return oliWrapperList;
+            
+        //     } catch (Exception e) {
+            //         System.debug('Error ::>> ' + e.getMessage() + ' Line Num ::>> ' + e.getLineNumber());
+            //         throw new AuraHandledException(e.getMessage());
+        //     }
+    // }
+
+
+    /**
+    * @description Fetches Pricing Details (PBE & RC) for given Products
+    * @author      Nathan
+    * @param       recordId   Id of parent record (used to detect object type, if needed later)
+    * @return      Map<Product2Id, Map<PriceType, Price>>
+    *              Example: { '01t..' => { 'PBE' => '100', 'RC' => '90' } }
+    **/
+    @AuraEnabled 
+    public static Map<String, Map<String, String>> callFetchPricingDetailFromLWC(String recordId) {
+        // Query POLI records with related Quote and Currency
+        List<Purchase_Order_Line_Item__c> poliList = [
+            SELECT Id, Product__c, Purchase_Order__r.Quote__c, Purchase_Order__r.CurrencyIsoCode, From_Rate_Contract__c
+            FROM Purchase_Order_Line_Item__c 
+            WHERE Purchase_Order__c = :recordId
+        ];
+
+        // Prepare set of Product2 Ids
+        Set<String> listOfIds = new Set<String>();
+        String quoteId;
+        String currencyCode;
+
+        for (Purchase_Order_Line_Item__c poli : poliList) {
+            if (poli.Product__c != null) {
+                listOfIds.add(poli.Product__c);
+            }
+            // Only set once, assuming same Quote & Currency for all lines
+            if (quoteId == null && poli.Purchase_Order__r.Quote__c != null) {
+                quoteId = poli.Purchase_Order__r.Quote__c;
+            }
+            if (currencyCode == null && poli.Purchase_Order__r.CurrencyIsoCode != null) {
+                currencyCode = poli.Purchase_Order__r.CurrencyIsoCode;
+            }
+        }
+
+        // Safety check
+        if (listOfIds.isEmpty() || String.isEmpty(quoteId) || String.isEmpty(currencyCode)) {
+            return new Map<String, Map<String, String>>();
+        }
+
+        // Call the actual pricing fetch method
+        return fetchPricingDetails(recordId, listOfIds, currencyCode, quoteId);
+    }
+
+    /**
+    * @description Fetches Pricing Details (PBE & RC) for given Products
+    * @author      Nathan
+    * @param       recordId   Id of parent record (used to detect object type, if needed later)
+    * @param       listOfIds  Set of Product2 Ids
+    * @param       currencyCode Currency ISO Code (e.g., USD, EUR, INR)
+    * @param       quoteId    Quote Id to extract Account & CreatedDate for RC lookup
+    * @return      Map<Product2Id, Map<PriceType, Price>>
+    *              Example: { '01t..' => { 'PBE' => '100', 'RC' => '90' } }
+    */
+    public static Map<String, Map<String, String>> fetchPricingDetails(
+        String recordId, 
+        Set<String> listOfIds, 
+        String currencyCode, 
+        String quoteId
+    ) {
+        String objectType = Id.valueOf(recordId).getSObjectType().getDescribe().getName();
+        System.debug('objectType:' + objectType);
+
+        // ---------------------------
+        // Build dynamic SOQL for PBE
+        // ---------------------------
+        String queryStringPBE  = 
+            'SELECT Id, Pricebook2.Name, UnitPrice, Product2Id, Product2.Name ' +
+            'FROM PricebookEntry ' +
+            'WHERE CurrencyIsoCode = \'' + currencyCode + '\' ' +
+            'AND Product2Id IN (\'' + String.join(new List<String>(listOfIds), '\',\'') + '\') ';
+
+        switch on currencyCode {
+            when 'USD', 'EUR' {
+                queryStringPBE += 'AND Pricebook2.Name LIKE \'%' + currencyCode + '%\' ';
+            } 
+            when else {
+                queryStringPBE += 'AND Pricebook2.Name LIKE \'%Standard%\' ';
+            }
+        }
+
+        List<PricebookEntry> pbeList = Database.query(queryStringPBE);
+        System.debug('pbeList:' + pbeList);
+
+        // ---------------------------
+        // Base Map: Product2Id → { "PBE" => UnitPrice }
+        // ---------------------------
+        Map<String, Map<String, String>> productPricingMap = new Map<String, Map<String, String>>();
+        for (PricebookEntry pbe : pbeList) {
+            if (!productPricingMap.containsKey(pbe.Product2Id)) {
+                productPricingMap.put(pbe.Product2Id, new Map<String, String>());
+            }
+            productPricingMap.get(pbe.Product2Id).put('PBE', String.valueOf(pbe.UnitPrice));
+        }
+
+        System.debug('After PBE load productPricingMap:' + productPricingMap);
+
+        // ---------------------------
+        // Fetch Quote details (Account + CreatedDate)
+        // ---------------------------
+        if(String.isBlank(quoteId)) return productPricingMap;
+        List<Quote> qt = [
+            SELECT Id, AccountId, CreatedDate 
+            FROM Quote 
+            WHERE Id = :quoteId 
+            LIMIT 1
+        ];
+
+        Date quoteDate = qt[0].CreatedDate.date();
+        // ---------------------------
+        // Fetch RC Prices directly from Rate Contract Line Items
+        // ---------------------------
+        List<Rate_Contract_Line_Item__c> rcliList = [
+            SELECT Id, Product__c, Actual_Price__c, Rate_Contract__r.Start_Date__c, Rate_Contract__r.End_Date__c
+            FROM Rate_Contract_Line_Item__c
+            WHERE Product__c IN :listOfIds
+            AND Rate_Contract__r.Account__c = :qt[0].AccountId
+            AND Rate_Contract__r.Start_Date__c <= :quoteDate
+            AND Rate_Contract__r.End_Date__c >= :quoteDate  
+        ];
+        System.debug('rcliList:' + rcliList);
+
+        // ---------------------------
+        // Populate RC Prices
+        // ---------------------------
+        for (Rate_Contract_Line_Item__c rcli : rcliList) {
+            if (!productPricingMap.containsKey(rcli.Product__c)) {
+                productPricingMap.put(rcli.Product__c, new Map<String, String>());
+            }
+            if (!productPricingMap.get(rcli.Product__c).containsKey('RC')) {
+                productPricingMap.get(rcli.Product__c).put('RC', String.valueOf(rcli.Actual_Price__c));
+            }
+        }
+
+        System.debug('Final productPricingMap:' + productPricingMap);
+        return productPricingMap;
+    }
+
+
+    /*
+    *@description: Checks if PO is in Approval (To Hide Edit if TRUE)
+    *@author:      Nathan
+    */
+    @AuraEnabled(cacheable=FALSE)
+    public static Boolean checkIfPOisInApproval(String recordId) {
+        String parentSObjectType = Id.valueOf(recordId).getSObjectType().getDescribe().getName();
+        if(parentSObjectType != 'Purchase_Order__c') return false;
+        if (String.isBlank(recordId)) return false;
+
+        List<ProcessInstance> approvals = [
+            SELECT Id
+            FROM ProcessInstance
+            WHERE TargetObjectId = :recordId
+            AND Status = 'Pending'
+            LIMIT 1
+        ];
+
+        return !approvals.isEmpty();
+    }
+    
+    @AuraEnabled
+    public static List<OLI_Wrapper> fetchDetails(String recordId) {
+        try {
+            System.debug('record Id :: ' + recordId);
+            String objectType = Id.valueOf(recordId).getSObjectType().getDescribe().getName();
+            System.debug('Object Type :: ' + objectType);
+            
+            List<OLI_Wrapper> oliWrapperList = new List<OLI_Wrapper>();
+            
+            if (objectType == 'Opportunity') {
+                // ============================ OPPORTUNITY LOGIC ============================
+                
+                List<OpportunityLineItem> oppProductList = [
+                SELECT Id, Product2Id, Product2.Parent_Product__c, ProductCode, Quantity, ListPrice, TotalPrice, UnitPrice, Product2.Name, Product2.RecordType.Name, Product2.Product_Type__c,Product2.Alternative_BOM__c,Product2.Description,
+                Solution_Name__c, Application_Name__c, Additional_Inspection__c, Manufacturing_Instruction__c, Logistics_Instruction__c,Product_Group_Name__c,Series_Name__c,Opportunity_Product_Hyperlink__c,Alternate_Product_Name__c,Alternate_Product_Model__c
+                FROM OpportunityLineItem 
+                WHERE OpportunityId = :recordId
+                ];
+                
+                System.debug('oppProductList :: '  + oppProductList);
+                
+                Set<Id> productIds = new Set<Id>();
+                Map<Id, OpportunityLineItem> prodIdVsOLIMap = new Map<Id, OpportunityLineItem>();
+                Map<Id, List<ALT_BOM>> parentProductToAltBomMap = new Map<Id, List<ALT_BOM>>();
+                
+                for (OpportunityLineItem oli : oppProductList) {
+                    productIds.add(oli.Product2Id);
+                    prodIdVsOLIMap.put(oli.Product2Id, oli);
+                    
+                    if (oli.Product2.Parent_Product__c != null) {
+                        Id parentProductId = oli.Product2.Parent_Product__c;
+                        ALT_BOM altBOM = new ALT_BOM();
+                        altBOM.Id = oli.Id;
+                        altBOM.ProductName = oli.Alternate_Product_Name__c;
+                        //altBOM.productModel = oli.Alternate_Product_Model__c;
+                        //altBOM.ProductName = oli.Product2.Name;
+                        altBOM.LogInstruction = oli.Logistics_Instruction__c;
+                        altBOM.ManfInstruction = oli.Manufacturing_Instruction__c;
+                        altBOM.AddInstruction = oli.Additional_Inspection__c;
+                        altBOM.Quantity = String.valueOf(oli.Quantity);
+                        altBOM.SalesPrice = String.valueOf(oli.UnitPrice);
+                        altBOM.ListPrice = String.valueOf(oli.ListPrice);
+                        altBOM.TotalPrice = String.valueOf(oli.TotalPrice);
+                        altBOM.AlternativeBOM = oli.Product2.Alternative_BOM__c;
+                        altBOM.Description = oli.Product2.Description;
+
+                        
+                        if (!parentProductToAltBomMap.containsKey(parentProductId)) {
+                            parentProductToAltBomMap.put(parentProductId, new List<ALT_BOM>());
+                        }
+                        parentProductToAltBomMap.get(parentProductId).add(altBOM);
+                    }
+                }
+                
+                List<Product_Configurator__c> primaryProdConfigs = [
+                SELECT Id, Product__c, Product__r.Name, Product_Category_Type__c, Parent_Product_Configurator__c 
+                FROM Product_Configurator__c 
+                WHERE Product__c IN :productIds
+                ];
+                
+                Map<Id, Product_Configurator__c> pcMap = new Map<Id, Product_Configurator__c>();
+                Set<Id> parentPCIds = new Set<Id>();
+                
+                for (Product_Configurator__c pc : primaryProdConfigs) {
+                    pcMap.put(pc.Id, pc);
+                    if (pc.Parent_Product_Configurator__c != null) {
+                        parentPCIds.add(pc.Parent_Product_Configurator__c);
+                    }
+                }
+                
+                while (!parentPCIds.isEmpty()) {
+                    List<Product_Configurator__c> tempProdConfigList = [
+                    SELECT Id, Product__c, Product__r.Name, Product_Category_Type__c, Parent_Product_Configurator__c 
+                    FROM Product_Configurator__c 
+                    WHERE Id IN :parentPCIds
+                ];
+                    
+                    parentPCIds.clear();
+                    for (Product_Configurator__c parentPc : tempProdConfigList) {
+                        if (!pcMap.containsKey(parentPc.Id)) {
+                            pcMap.put(parentPc.Id, parentPc);
+                            if (parentPc.Parent_Product_Configurator__c != null) {
+                                parentPCIds.add(parentPc.Parent_Product_Configurator__c);
+                            }
+                        }
+                    }
+                }
+                
+                Map<Id, Product_Configurator__c> productToPCMap = new Map<Id, Product_Configurator__c>();
+                for (Product_Configurator__c pc : primaryProdConfigs) {
+                    productToPCMap.put(pc.Product__c, pc);
+                }
+                
+                for (OpportunityLineItem oli : oppProductList) {
+                    if (oli.Product2.Parent_Product__c != null) {
+                        continue;
+                    }
+                    
+                    OLI_Wrapper wrapper = new OLI_Wrapper();
+                    wrapper.Id = oli.Id;
+                    wrapper.ShowOnlyEdit = FALSE;
+                    //wrapper.ProductName = oli.Product2.Name;
+                    wrapper.ProductName = oli.Alternate_Product_Name__c;
+                    //wrapper.productModel = oli.Alternate_Product_Model__c;
+                    //wrapper.productModel = oli.Alternate_Product_Model__c;
+                    wrapper.Quantity = String.valueOf(oli.Quantity);
+                    wrapper.SalesPrice = String.valueOf(oli.UnitPrice);
+                    wrapper.ListPrice = String.valueOf(oli.ListPrice);
+
+                    wrapper.ProductCode = oli.ProductCode; 
+
+                    wrapper.TotalPrice = String.valueOf(oli.TotalPrice);
+                    wrapper.ProductGroup = oli.Product_Group_Name__c;
+                    wrapper.productSeries = oli.Series_Name__c;
+                    wrapper.ProductType = oli.Product2.RecordType.Name;
+                    wrapper.CropSolution = oli.Solution_Name__c;
+                    if(oli.Product2.RecordType.Name == 'Spares')
+                        wrapper.ProductGroup = 'Spares';
+                    wrapper.Application = oli.Application_Name__c;
+                    wrapper.SoilType = oli.Solution_Name__c;
+                    wrapper.LogInstruction = oli.Logistics_Instruction__c;
+                    wrapper.ManfInstruction = oli.Manufacturing_Instruction__c;
+                    wrapper.AddInstruction = oli.Additional_Inspection__c;
+                    
+                    Product_Configurator__c pc = productToPCMap.get(oli.Product2Id);
+                    
+                    if (parentProductToAltBomMap.containsKey(oli.Product2Id)) {
+                        wrapper.altBOMList = parentProductToAltBomMap.get(oli.Product2Id);
+                    } else {
+                        wrapper.altBOMList = new List<ALT_BOM>();
+                    }
+                    
+                    oliWrapperList.add(wrapper);
+                }
+                
+            } else if (objectType == 'Quote') {
+                // ============================ QUOTE LOGIC ============================
+                
+                List<QuoteLineItem> quoteLineItems = [
+                SELECT Id, Product2Id, Product2.Parent_Product__c, Quantity, ListPrice, TotalPrice, UnitPrice,Product2.Alternative_BOM__c,Product2.Description,
+                       Product2.Name,Alternate_Product_Name__c,Product2.RecordType.Name, Product2.Product_Type__c,Solution_Name__c, Application_Name__c, Additional_Inspection__c, Manufacturing_Instruction__c, Logistics_Instruction__c,Product_Group_Name__c,Series_Name__c,Quote_Product_Hyperlink__c,Total_Value_Actual_Price__c,Total_Value_Sales_Price__c,Product_Description__c,From_Rate_Contract__c
+                FROM QuoteLineItem
+                WHERE QuoteId = :recordId
+                ];
+                
+                Set<Id> productIds = new Set<Id>();
+                Map<Id, QuoteLineItem> prodIdVsQLIMap = new Map<Id, QuoteLineItem>();
+                Map<Id, List<ALT_BOM>> parentProductToAltBomMap = new Map<Id, List<ALT_BOM>>();
+                
+                for (QuoteLineItem qli : quoteLineItems) {
+                    productIds.add(qli.Product2Id);
+                    prodIdVsQLIMap.put(qli.Product2Id, qli);
+                    
+                    if (qli.Product2.Parent_Product__c != null) {
+                        Id parentProductId = qli.Product2.Parent_Product__c;
+                        ALT_BOM altBOM = new ALT_BOM();
+                        altBOM.Id = qli.Id;
+                        altBOM.ProductName = qli.Alternate_Product_Name__c;
+                       // altBOM.productModel = qli.Alternate_Product_Model__c;
+                        altBOM.Quantity = String.valueOf(qli.Quantity);
+                        altBOM.SalesPrice = String.valueOf(qli.UnitPrice);
+                        altBOM.ListPrice = String.valueOf(qli.ListPrice);
+                        altBOM.TotalPrice = String.valueOf(qli.TotalPrice);
+                        altBOM.LogInstruction = qli.Logistics_Instruction__c;
+                        altBOM.ManfInstruction = qli.Manufacturing_Instruction__c;
+                        altBOM.AddInstruction = qli.Additional_Inspection__c;
+                        altBOM.AlternativeBOM = qli.Product2.Alternative_BOM__c;
+                        altBOM.Description = qli.Product2.Description;
+
+                        
+                        
+                        if (!parentProductToAltBomMap.containsKey(parentProductId)) {
+                            parentProductToAltBomMap.put(parentProductId, new List<ALT_BOM>());
+                        }
+                        parentProductToAltBomMap.get(parentProductId).add(altBOM);
+                    }
+                }
+                
+                List<Product_Configurator__c> primaryProdConfigs = [
+                SELECT Id, Product__c, Product__r.Name, Product_Category_Type__c, Parent_Product_Configurator__c 
+                FROM Product_Configurator__c 
+                WHERE Product__c IN :productIds
+             ];
+                
+                Map<Id, Product_Configurator__c> pcMap = new Map<Id, Product_Configurator__c>();
+                Set<Id> parentPCIds = new Set<Id>();
+                
+                for (Product_Configurator__c pc : primaryProdConfigs) {
+                    pcMap.put(pc.Id, pc);
+                    if (pc.Parent_Product_Configurator__c != null) {
+                        parentPCIds.add(pc.Parent_Product_Configurator__c);
+                    }
+                }
+                
+                while (!parentPCIds.isEmpty()) {
+                    List<Product_Configurator__c> tempProdConfigList = [
+                    SELECT Id, Product__c, Product__r.Name, Product_Category_Type__c, Parent_Product_Configurator__c 
+                    FROM Product_Configurator__c 
+                    WHERE Id IN :parentPCIds
+                ];
+                    
+                    parentPCIds.clear();
+                    for (Product_Configurator__c parentPc : tempProdConfigList) {
+                        if (!pcMap.containsKey(parentPc.Id)) {
+                            pcMap.put(parentPc.Id, parentPc);
+                            if (parentPc.Parent_Product_Configurator__c != null) {
+                                parentPCIds.add(parentPc.Parent_Product_Configurator__c);
+                            }
+                        }
+                    }
+                }
+                
+                Map<Id, Product_Configurator__c> productToPCMap = new Map<Id, Product_Configurator__c>();
+                for (Product_Configurator__c pc : primaryProdConfigs) {
+                    productToPCMap.put(pc.Product__c, pc);
+                }
+                
+                for (QuoteLineItem qli : quoteLineItems) {
+                    if (qli.Product2.Parent_Product__c != null) {
+                        continue;
+                    }
+                    
+                    OLI_Wrapper wrapper = new OLI_Wrapper();
+                    wrapper.Id = qli.Id;
+                    wrapper.ProductName = qli.Alternate_Product_Name__c;
+                    wrapper.ShowOnlyEdit = FALSE;
+                    //wrapper.productModel = qli.Alternate_Product_Model__c;
+                    wrapper.Quantity = String.valueOf(qli.Quantity);
+                    wrapper.SalesPrice = String.valueOf(qli.UnitPrice);
+                    wrapper.ListPrice = String.valueOf(qli.ListPrice);
+                    wrapper.TotalPrice = String.valueOf(qli.TotalPrice);
+                    wrapper.ProductGroup = qli.Product_Group_Name__c;
+                    wrapper.productSeries = qli.Series_Name__c;
+                    wrapper.ProductType = qli.Product2.RecordType.Name;
+                    wrapper.CropSolution = qli.Solution_Name__c;
+                    if(qli.Product2.RecordType.Name == 'Spares')
+                        wrapper.ProductGroup = 'Spares';
+                    wrapper.Application = qli.Application_Name__c;
+                    wrapper.SoilType = qli.Solution_Name__c;
+                    wrapper.LogInstruction = qli.Logistics_Instruction__c;
+                    wrapper.ManfInstruction = qli.Manufacturing_Instruction__c;
+                    wrapper.AddInstruction = qli.Additional_Inspection__c;
+                    //wrapper.TotalValueActualPrice = qli.Total_Value_Actual_Price__c;
+                    //wrapper.TotalValueSalesPrice = qli.Total_Value_Sales_Price__c;
+                    //wrapper.ProductDescription = qli.Product_Description__c;
+
+                    wrapper.TotalValueActualPrice  = String.valueOf(qli.Total_Value_Actual_Price__c);
+                    wrapper.TotalValueSalesPrice   = String.valueOf(qli.Total_Value_Sales_Price__c);
+                    wrapper.ProductDescription     = String.valueOf(qli.Product_Description__c);
+
+                    wrapper.FromRateContract = qli.From_Rate_Contract__c;
+                    
+
+                    
+                    Product_Configurator__c pc = productToPCMap.get(qli.Product2Id);
+                    
+                    if (parentProductToAltBomMap.containsKey(qli.Product2Id)) {
+                        wrapper.altBOMList = parentProductToAltBomMap.get(qli.Product2Id);
+                    } else {
+                        wrapper.altBOMList = new List<ALT_BOM>();
+                    }
+                    
+                    oliWrapperList.add(wrapper);
+                }
+            } else if (objectType == 'Purchase_Order__c') {
+
+
+                // ============================ PURCHASE ORDER LOGIC ============================
+
+                List<Purchase_Order_Line_Item__c> poLineItemList = [
+                    SELECT Id, Product__c, Product__r.Name, Product__r.Parent_Product__c,Product_Code__c,Product__r.ProductCode,
+                        Product__r.RecordType.Name, 
+                        Product__r.Family,          
+                        Quantity__c, Unit_Price__c, Total_Price__c, TotalPrice__c,
+                        Item_Description__c, Application_Name__c, Additional_Inspection__c,
+                        Manufacturing_Instruction__c, Logistics_Instruction__c,
+                        Product_Group_Name__c, Series_Name__c, Solution_Name__c,
+                        Alternate_Product_Name__c, Alternate_Product_Model__c,
+                        Alternative_BOM__c, Distributor_Remarks__c, Priority__c,
+                        Material__c, Material_Number__c, Item_CATEG__c, STORE_LOC__c, From_Rate_Contract__c,
+                        Purchase_Order__r.Quote__c, Purchase_Order__r.CurrencyIsoCode, Old_Price__c
+                    FROM Purchase_Order_Line_Item__c
+                    WHERE Purchase_Order__c = :recordId
+                ];
+
+                System.debug('poLineItemList :: ' + poLineItemList);
+                
+                Set<String> productIds = new Set<String>();
+                Map<Id, List<ALT_BOM>> parentProductToAltBomMap = new Map<Id, List<ALT_BOM>>();
+                String quoteId = '';
+                String currecyCode = '';
+
+
+                for (Purchase_Order_Line_Item__c poli : poLineItemList) {
+                    quoteId = poli.Purchase_Order__r.Quote__c;
+                    currecyCode = poli.Purchase_Order__r.CurrencyIsoCode  ;
+                    if (poli.Product__c != null) {
+                        productIds.add(poli.Product__c);
+                    }
+                }
+
+                Map<String, Map<String, String>> pricingMap = new Map<String, Map<String, String>>();
+                if(!productIds.isEmpty()){
+                    pricingMap = fetchPricingDetails(recordId, productIds, currecyCode, quoteId);
+                }
+
+                // === Fetch configurators for all products ===
+                List<Product_Configurator__c> primaryProdConfigs = [
+                    SELECT Id, Product__c, Product__r.Name, Product_Category_Type__c, Parent_Product_Configurator__c
+                    FROM Product_Configurator__c
+                    WHERE Product__c IN :productIds
+                ];
+
+                Map<Id, Product_Configurator__c> pcMap = new Map<Id, Product_Configurator__c>();
+                Set<Id> parentPCIds = new Set<Id>();
+
+                for (Product_Configurator__c pc : primaryProdConfigs) {
+                    pcMap.put(pc.Id, pc);
+                    if (pc.Parent_Product_Configurator__c != null) {
+                        parentPCIds.add(pc.Parent_Product_Configurator__c);
+                    }
+                }
+
+                while (!parentPCIds.isEmpty()) {
+                    List<Product_Configurator__c> tempProdConfigList = [
+                        SELECT Id, Product__c, Product__r.Name, Product_Category_Type__c, Parent_Product_Configurator__c
+                        FROM Product_Configurator__c
+                        WHERE Id IN :parentPCIds
+                    ];
+
+                    parentPCIds.clear();
+                    for (Product_Configurator__c parentPc : tempProdConfigList) {
+                        if (!pcMap.containsKey(parentPc.Id)) {
+                            pcMap.put(parentPc.Id, parentPc);
+                            if (parentPc.Parent_Product_Configurator__c != null) {
+                                parentPCIds.add(parentPc.Parent_Product_Configurator__c);
+                            }
+                        }
+                    }
+                }
+
+                // ✅ Now we can safely build productToPCMap
+                Map<Id, Product_Configurator__c> productToPCMap = new Map<Id, Product_Configurator__c>();
+                for (Product_Configurator__c pc : primaryProdConfigs) {
+                    productToPCMap.put(pc.Product__c, pc);
+                }
+
+                // === Build wrappers ===
+                for (Purchase_Order_Line_Item__c poli : poLineItemList) {
+                    if (poli.Product__r != null && poli.Product__r.Parent_Product__c != null) {
+                        continue;
+                    }
+
+                    OLI_Wrapper wrapper = new OLI_Wrapper();
+                    wrapper.Id = poli.Id;
+                    wrapper.ShowOnlyEdit = TRUE;
+                    wrapper.ProductName = poli.Alternate_Product_Name__c;
+                    wrapper.ProductCode = poli.Product__r != null ? poli.Product__r.ProductCode : null;
+
+                    wrapper.Quantity = String.valueOf(poli.Quantity__c);
+                    wrapper.SalesPrice = String.valueOf(poli.Unit_Price__c);
+                    wrapper.ListPrice = null; // Not available on POLI
+                    wrapper.TotalPrice = String.valueOf(poli.TotalPrice__c);
+                    wrapper.FromRateContract = poli.From_Rate_Contract__c;
+                    wrapper.OldPrice = String.valueOf(poli.Old_Price__c);
+                    
+
+                     // ✅ Populate from pricingMap if available
+                    if (pricingMap.containsKey(poli.Product__c)) {
+                        Map<String, String> priceDetails = pricingMap.get(poli.Product__c);
+
+                        wrapper.RC_Price    = priceDetails.containsKey('RC')  ? priceDetails.get('RC')  : null;
+                        wrapper.PBE_Price   = priceDetails.containsKey('PBE') ? priceDetails.get('PBE') : null;
+
+                        // Optional deviation calculation (if you want to show % or diff)
+                        if (wrapper.RC_Price != null && wrapper.SalesPrice != null) {
+                            wrapper.DeviationRC = 
+                                String.valueOf(Decimal.valueOf(wrapper.SalesPrice) - Decimal.valueOf(wrapper.RC_Price));
+                        }
+                        if (wrapper.PBE_Price != null && wrapper.SalesPrice != null) {
+                            wrapper.DeviationPBE = 
+                                String.valueOf(Decimal.valueOf(wrapper.SalesPrice) - Decimal.valueOf(wrapper.PBE_Price));
+                        }
+                    }
+
+                    // 🔥 Match OLI logic: Spares / Seedcare / else Product_Group_Name__c
+                    if (poli.Product__r != null) {
+                        if (poli.Product__r.RecordType.Name == 'Spares') {
+                            wrapper.ProductGroup = 'Spares';
+                        } else if (poli.Product__r.Family == 'Seedcare') {
+                            wrapper.ProductGroup = 'Seedcare';
+                        } else {
+                            wrapper.ProductGroup = poli.Product_Group_Name__c;
+                        }
+                    } else {
+                        wrapper.ProductGroup = poli.Product_Group_Name__c;
+                    }
+
+                    wrapper.productSeries = poli.Series_Name__c;
+                    wrapper.ProductType = poli.Product__r != null ? poli.Product__r.RecordType.Name : null;
+                    wrapper.CropSolution = poli.Solution_Name__c;
+                    wrapper.Application = poli.Application_Name__c;
+                    wrapper.SoilType = poli.Solution_Name__c;
+                    wrapper.LogInstruction = poli.Logistics_Instruction__c;
+                    wrapper.ManfInstruction = poli.Manufacturing_Instruction__c;
+                    wrapper.AddInstruction = poli.Additional_Inspection__c;
+
+                    wrapper.altBOMList = parentProductToAltBomMap.containsKey(poli.Product__c)
+                        ? parentProductToAltBomMap.get(poli.Product__c)
+                        : new List<ALT_BOM>();
+
+                    // Optional: attach configurator if needed
+                    // wrapper.ProductConfigurator = productToPCMap.get(poli.Product__c);
+
+                    oliWrapperList.add(wrapper);
+                }
+            }
+
+
+            
+            System.debug('oliWrapperList :: ' + oliWrapperList);
+            return oliWrapperList;
+            
+        } catch (Exception e) {
+            System.debug('Error ::>> ' + e.getMessage() + ' Line Num ::>> ' + e.getLineNumber());
+            throw new AuraHandledException(e.getMessage());
+        }
+    }
+    
+    
+    @AuraEnabled(cacheable=true)
+    public static List<Pricebook2> getPricebooks() {
+        return [SELECT Id, Name FROM Pricebook2 WHERE IsActive = TRUE];
+    }
+    
+    @AuraEnabled
+    public static void updatePricebook(String opportunityId, String pricebookId) {
+        try {
+            System.debug('opportunityId: ' + opportunityId);
+            System.debug('pricebookId: ' + pricebookId);
+            String objectType = Id.valueOf(opportunityId).getSObjectType().getDescribe().getName();
+            System.debug('Object Type :: ' + objectType);
+
+            Pricebook2 pb = [SELECT Id,IsActive,Name,CurrencyIsoCode FROM Pricebook2 where IsActive =true And Id =: pricebookId LIMIT 1];
+        //     Opportunity opp = [SELECT Id, PricebookId__c,Pricebook2Id FROM Opportunity WHERE Id = :opportunityId LIMIT 1];
+        //     opp.PricebookId__c = pricebookId;
+        //     opp.Pricebook2Id = pricebookId;
+        //     opp.CurrencyIsoCode = pb.CurrencyIsoCode;
+        //     update opp;
+        // } catch (Exception e) {
+        //     System.debug('Error updating Pricebook: ' + e.getMessage());
+        //     throw new AuraHandledException('Error updating Pricebook: ' + e.getMessage());
+        // }
+                if (objectType == 'Opportunity') {
+            Opportunity opp = [
+                SELECT Id, PricebookId__c, Pricebook2Id, CurrencyIsoCode 
+                FROM Opportunity 
+                WHERE Id = :opportunityId 
+                LIMIT 1
+            ];
+            opp.PricebookId__c = pricebookId;
+            opp.Pricebook2Id = pricebookId;
+            opp.CurrencyIsoCode = pb.CurrencyIsoCode;
+            update opp;
+
+        } else if (objectType == 'Quote') {
+            Quote quote = [
+                SELECT Id, Pricebook2Id, CurrencyIsoCode 
+                FROM Quote 
+                WHERE Id = :opportunityId 
+                LIMIT 1
+            ];
+            quote.Pricebook2Id = pricebookId;
+            quote.CurrencyIsoCode = pb.CurrencyIsoCode;
+            update quote;
+
+        } else {
+            throw new AuraHandledException('Unsupported record type: ' + objectType);
+        }
+
+    } catch (Exception e) {
+        System.debug('Error updating Pricebook: ' + e.getMessage());
+        throw new AuraHandledException('Error updating Pricebook: ' + e.getMessage());
+    }
+    }
+    
+
+    
+    // @AuraEnabled(cacheable=true)
+    // public static String getPricebookName(Id opportunityId) {
+    //     if (String.isEmpty(opportunityId)) {
+    //         return null;
+    //     }
+        
+    //     try {
+    //         String objectType = opportunityId.getSObjectType().getDescribe().getName();
+    //         System.debug('Record ID: ' + opportunityId + ', Object Type: ' + objectType);
+            
+    //         Id pricebookId;
+            
+    //         if (objectType == 'Opportunity') {
+    //             Opportunity opp = [
+    //             SELECT PricebookId__c 
+    //             FROM Opportunity 
+    //             WHERE Id = :opportunityId
+    //             LIMIT 1
+    //         ];
+    //             pricebookId = opp.PricebookId__c;
+                
+    //         } else if (objectType == 'Quote') {
+    //             Quote quote = [
+    //             SELECT Pricebook2Id 
+    //             FROM Quote 
+    //             WHERE Id = :opportunityId
+    //             LIMIT 1
+    //         ];
+    //             pricebookId = quote.Pricebook2Id;
+    //         } else {
+    //             return null; // Not an Opportunity or Quote
+    //         }
+            
+    //         if (pricebookId == null) {
+    //             return null;
+    //         }
+            
+    //         Pricebook2 pb = [
+    //         SELECT Name 
+    //         FROM Pricebook2 
+    //         WHERE Id = :pricebookId
+    //         LIMIT 1
+    //     ];
+            
+    //         return pb.Name;
+            
+    //     } catch (Exception e) {
+    //         System.debug('Error in getPricebookName: ' + e.getMessage());
+    //         return null;
+    //     }
+    // }
+ @AuraEnabled(cacheable=true)
+    public static Id getPricebookName(Id opportunityId) { // Change return type from String to Id
+    if (String.isEmpty(opportunityId)) {
+        return null;
+    }
+
+    try {
+        String objectType = opportunityId.getSObjectType().getDescribe().getName();
+        System.debug('Record ID: ' + opportunityId + ', Object Type: ' + objectType);
+
+        Id pricebookId;
+
+        if (objectType == 'Opportunity') {
+            Opportunity opp = [
+                SELECT Pricebook2Id // Correct field for standard PricebookId on Opportunity
+                FROM Opportunity
+                WHERE Id = :opportunityId
+                LIMIT 1
+            ];
+            // Check if standard PricebookId is populated, otherwise try custom field
+            pricebookId = opp.Pricebook2Id != null ? opp.Pricebook2Id : opp.PricebookId__c; 
+            // ^^^ ASSUMING PricebookId__c is a custom field for Pricebook lookup
+            // If it's a standard Opportunity Pricebook, it's just 'PricebookId'
+            // If you always use your custom PricebookId__c, then just use that.
+            // Let's assume you intend to use the standard one if available, or your custom one.
+            // Make sure your updatePricebook Apex also updates the correct field.
+
+        } else if (objectType == 'Quote') {
+            Quote quote = [
+                SELECT Pricebook2Id
+                FROM Quote
+                WHERE Id = :opportunityId
+                LIMIT 1
+            ];
+            pricebookId = quote.Pricebook2Id;
+        } else {
+            return null; // Not an Opportunity or Quote
+        }
+
+        return pricebookId; // <--- RETURN THE ID HERE!
+
+    } catch (Exception e) {
+        System.debug('Error in getPricebookName: ' + e.getMessage());
+        return null;
+    }
+}
+    
+    
+    @AuraEnabled(cacheable=true)
+    public static Boolean hasLineItems(String opportunityId) {
+        return [
+        SELECT COUNT() 
+        FROM OpportunityLineItem 
+        WHERE OpportunityId = :opportunityId
+    ] > 0;
+    }
+    
+    
+    
+    
+    
+    // Wrapper Classes
+    public class OLI_Wrapper {
+        @AuraEnabled public String Id;
+        @AuraEnabled public String ProductName;
+        @AuraEnabled public String productModel;
+        @AuraEnabled public String Quantity;
+        @AuraEnabled public String ListPrice;
+        @AuraEnabled public String ProductCode;
+        @AuraEnabled public String SalesPrice;
+        @AuraEnabled public String TotalPrice;
+        @AuraEnabled public String Application;
+        @AuraEnabled public String CropSolution;
+        @AuraEnabled public String Solution;
+        @AuraEnabled public String SoilType;
+        @AuraEnabled public String ProductGroup;
+        @AuraEnabled public String productSeries;
+        @AuraEnabled public String ProductType;
+        @AuraEnabled public String LogInstruction;
+        @AuraEnabled public String ManfInstruction;
+        @AuraEnabled public String AddInstruction;
+        @AuraEnabled public String TotalValueActualPrice;
+        @AuraEnabled public String TotalValueSalesPrice;
+        @AuraEnabled public String ProductDescription;
+        @AuraEnabled public String RC_Price;
+        @AuraEnabled public String PBE_Price;
+        @AuraEnabled public String DeviationRC; // Deviation from RC Price
+        @AuraEnabled public String DeviationPBE; // Deviation from PBE Price
+        @AuraEnabled public Boolean FromRateContract;
+        @AuraEnabled public Boolean ShowOnlyEdit;
+        @AuraEnabled public String OldPrice;
+
+        
+        @AuraEnabled public List<ALT_BOM> altBOMList;
+    }
+    
+    public class ALT_BOM {
+        @AuraEnabled public String Id;
+        @AuraEnabled public String ProductName;
+        @AuraEnabled public String productModel;
+        @AuraEnabled public String Quantity;
+        @AuraEnabled public String ListPrice;
+        @AuraEnabled public String SalesPrice;
+        @AuraEnabled public String TotalPrice;
+        @AuraEnabled public String LogInstruction;
+        @AuraEnabled public String ManfInstruction;
+        @AuraEnabled public String AddInstruction;
+        @AuraEnabled public String AlternativeBOM;
+        @AuraEnabled public String Description;
+
+    }
+}
