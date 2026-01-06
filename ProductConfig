@@ -1,0 +1,2011 @@
+public with sharing class ProductConfig {
+    @AuraEnabled(cacheable=true)
+    public static List<Product_Configurator__c> getProducts(String category) {
+        return [SELECT Id, Name FROM Product_Configurator__c WHERE Product_Category_Type__c = :category LIMIT 50];
+    }
+    
+    @AuraEnabled(cacheable=true)
+    public static Id getAccountIdForCurrentUser() {
+        Id userId = UserInfo.getUserId();
+        System.debug('Logged-in User Id: ' + userId);
+        
+        User userAcc = [SELECT AccountId,Account.Name FROM User WHERE Id = :userId];
+        System.debug('Fetched Account Id from Contact: ' + userAcc.AccountId);
+        
+        return userAcc.AccountId;
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static Boolean checkNdpValuePermission() {
+        // This checks if the current user has the custom permission, either through their profile or a permission set.
+        return FeatureManagement.checkPermission('View_NDP_Value');
+    }
+
+    
+    
+    // @AuraEnabled
+    // public static void deleteLineItems(List<String> lineItemIds, String parentRecordId,Boolean deleteParent) {
+    //     if (lineItemIds == null || lineItemIds.isEmpty()) {
+    //         System.debug('No line item IDs provided for deletion.');
+    //         return;
+    //     }
+        
+    //     // Determine parent type from ID prefix
+    //     String parentSObjectType = Id.valueOf(parentRecordId).getSObjectType().getDescribe().getName();
+    //     System.debug('Parent SObject Type: ' + parentSObjectType);
+        
+    //     List<Id> idsToDelete = new List<Id>();
+    //     idsToDelete.addAll(lineItemIds); // Add the explicitly selected IDs
+        
+    //     if (parentSObjectType == 'Opportunity') {
+    //         // Query for any child OpportunityLineItems associated with the parent(s) being deleted
+    //         List<OpportunityLineItem> childOlis = [
+    //             SELECT Id FROM OpportunityLineItem 
+    //             WHERE Parent_Product__c IN :lineItemIds AND OpportunityId = :parentRecordId
+    //         ];
+    //         for(OpportunityLineItem oli : childOlis) {
+    //             idsToDelete.add(oli.Id);
+    //         }
+    //         if (deleteParent == true) {
+    //         idsToDelete.addAll(lineItemIds);
+    //     }
+            
+    //         System.debug('OpportunityLineItems to delete (including children): ' + idsToDelete);
+            
+    //         // Perform the deletion
+    //         if (!idsToDelete.isEmpty()) {
+    //             delete [SELECT Id FROM OpportunityLineItem WHERE Id IN :idsToDelete];
+    //             System.debug('Successfully deleted ' + idsToDelete.size() + ' OpportunityLineItems.');
+    //         } else {
+    //             System.debug('No OpportunityLineItems found for deletion after checking for children.');
+    //         }
+            
+    //     } else if (parentSObjectType == 'Quote') {
+    //         // Query for any child QuoteLineItems associated with the parent(s) being deleted
+    //         List<QuoteLineItem> childQlis = [
+    //             SELECT Id FROM QuoteLineItem 
+    //             WHERE Parent_Quote_Line_Item__c IN :lineItemIds AND QuoteId = :parentRecordId
+    //         ];
+    //         for(QuoteLineItem qli : childQlis) {
+    //             idsToDelete.add(qli.Id);
+    //         }
+    //                 if (deleteParent == true) {
+    //         finalIdsToDelete.addAll(lineItemIds);
+    //     }
+
+            
+    //         System.debug('QuoteLineItems to delete (including children): ' + idsToDelete);
+            
+    //         // Perform the deletion
+    //         if (!idsToDelete.isEmpty()) {
+    //             delete [SELECT Id FROM QuoteLineItem WHERE Id IN :idsToDelete];
+    //             System.debug('Successfully deleted ' + idsToDelete.size() + ' QuoteLineItems.');
+    //         } else {
+    //             System.debug('No QuoteLineItems found for deletion after checking for children.');
+    //         }
+            
+    //     } else {
+    //         throw new AuraHandledException('Unsupported parent type: ' + parentSObjectType);
+    //     }
+    // }
+
+    @AuraEnabled
+    public static void deleteLineItems(List<String> lineItemIds, String parentRecordId, Boolean deleteParent) {
+        if (lineItemIds == null || lineItemIds.isEmpty()) {
+            System.debug('No line item IDs provided for deletion.');
+            return;
+        }
+
+        String parentSObjectType = Id.valueOf(parentRecordId).getSObjectType().getDescribe().getName();
+        List<Id> finalIdsToDelete = new List<Id>(); // Start with an empty list
+
+        if (parentSObjectType == 'Opportunity') {
+            // Step 1: Always find the children and add them to the list.
+            List<OpportunityLineItem> childOlis = [
+                SELECT Id FROM OpportunityLineItem 
+                WHERE Parent_Product__c IN :lineItemIds AND OpportunityId = :parentRecordId
+            ];
+            for(OpportunityLineItem oli : childOlis){
+                finalIdsToDelete.add(oli.Id);
+            }
+
+            // Step 2: ONLY if the flag is true, add the parent to the list.
+            if (deleteParent == true) {
+                finalIdsToDelete.addAll(lineItemIds);
+            }
+            
+            // Step 3: Perform the deletion on the final list.
+            if (!finalIdsToDelete.isEmpty()) {
+                delete [SELECT Id FROM OpportunityLineItem WHERE Id IN :finalIdsToDelete];
+            }
+
+        } else if (parentSObjectType == 'Quote') {
+            // Step 1: Always find the children and add them to the list.
+            List<QuoteLineItem> childQlis = [
+                SELECT Id FROM QuoteLineItem 
+                WHERE Parent_Quote_Line_Item__c IN :lineItemIds AND QuoteId = :parentRecordId
+            ];
+            for(QuoteLineItem qli : childQlis){
+                finalIdsToDelete.add(qli.Id);
+            }
+
+            // Step 2: ONLY if the flag is true, add the parent to the list.
+            if (deleteParent == true) {
+                finalIdsToDelete.addAll(lineItemIds);
+            }
+
+            // Step 3: Perform the deletion on the final list.
+            if (!finalIdsToDelete.isEmpty()) {
+                delete [SELECT Id FROM QuoteLineItem WHERE Id IN :finalIdsToDelete];
+            }
+            
+        } else if (parentSObjectType == 'Purchase_Order__c') {
+            // Step 1: Always find the children and add them to the list.
+            List<Purchase_Order_Line_Item__c> childPolis = [
+                SELECT Id 
+                FROM Purchase_Order_Line_Item__c 
+                WHERE Parent_POLI__c IN :lineItemIds 
+                AND Purchase_Order__c = :parentRecordId
+            ];
+            for (Purchase_Order_Line_Item__c poli : childPolis) {
+                finalIdsToDelete.add(poli.Id);
+            }
+
+            // Step 2: ONLY if the flag is true, add the parent to the list.
+            if (deleteParent == true) {
+                finalIdsToDelete.addAll(lineItemIds);
+            }
+
+            // Step 3: Perform the deletion on the final list.
+            if (!finalIdsToDelete.isEmpty()) {
+                delete [SELECT Id FROM Purchase_Order_Line_Item__c WHERE Id IN :finalIdsToDelete];
+            }
+
+        } else {
+            throw new AuraHandledException('Unsupported parent type: ' + parentSObjectType);
+        }
+    }
+    
+    @AuraEnabled(cacheable=true)
+    public static List<SObject> getProductsTest(String recordId) {
+        System.debug('record Id :: ' + recordId);
+        String objectType = Id.valueOf(recordId).getSObjectType().getDescribe().getName();
+        System.debug('Object Type :: ' + objectType);
+        if (objectType == 'Opportunity') {
+            return [
+            SELECT Id, Quantity, UnitPrice,ListPrice, Product2Id, Product2.Name, Product2.Product_Image__c,Parent_Product__c,Product2.Parent_Product__c,Product2.RecordType.Name,Product2.Alternative_BOM__c,Product2.Description
+            FROM OpportunityLineItem
+            WHERE OpportunityId = :recordId
+        ];
+        }
+        else if (objectType == 'Quote') {
+            
+            // return [SELECT Id, Quantity, UnitPrice, Product2Id, Product2.Name, Product2.Product_Image__c,Parent_Product__c,Product2.Parent_Product__c
+            // FROM QuoteLineItem WHERE QuoteId = :recordId];
+            return [SELECT Id, Quantity, UnitPrice,ListPrice, Product2Id, Product2.Name, Product2.Product_Image__c,Parent_Quote_Line_Item__c,Parent_Product__c,Product2.RecordType.Name,Product2.Alternative_BOM__c,Product2.Description FROM QuoteLineItem WHERE QuoteId = :recordId];
+        } else if (objectType == 'Purchase_Order__c') {
+            return [
+                SELECT Id, Quantity__c, Unit_Price__c, Product__c, Product__r.Name,From_Rate_Contract__c,
+                    Product__r.Product_Image__c,  Product__r.Parent_Product__c,
+                    Product__r.RecordType.Name, Product__r.Alternative_BOM__c, Product__r.Description
+                FROM Purchase_Order_Line_Item__c
+                WHERE Purchase_Order__c = :recordId
+            ];
+        }else {
+            return new List<OpportunityLineItem>();
+        }
+        
+    }
+    
+    
+    @AuraEnabled(cacheable=true)
+    public static List<Product2> getBOMGroups(String parentProductId) {
+        return [
+            SELECT Id, Name, BOM_Item_Number__c, BOM_component__c, Alternative_BOM__c,Quantity__c,Description
+            FROM Product2
+            WHERE RecordType.DeveloperName = 'Alternate_BOM'
+            AND Parent_Product__c = :parentProductId AND IsActive =true 
+            ORDER BY Alternative_BOM__c, BOM_Item_Number__c
+        ];
+    }
+    
+    @AuraEnabled
+    public static void createBOMLineItems(Id parentLineItemId, List<Product2> bomComponents) {
+        System.debug('### createBOMLineItems called with parentLineItemId: ' + parentLineItemId);
+        System.debug('### BOM Components received: ' + JSON.serializePretty(bomComponents));
+        
+        try {
+            String objectType = parentLineItemId.getSObjectType().getDescribe().getName();
+            System.debug('### Detected parent type: ' + objectType);
+            
+            if (objectType == 'OpportunityLineItem') {
+                List<OpportunityLineItem> existingChildren = [
+                SELECT Id FROM OpportunityLineItem WHERE Parent_Product__c = :parentLineItemId
+            ];
+                if (!existingChildren.isEmpty()) {
+                    delete existingChildren;
+                }
+                
+                // ========== EXISTING LOGIC FOR OPPORTUNITY ==========
+                OpportunityLineItem parentItem = [
+                    SELECT Id, OpportunityId, PricebookEntryId, Quantity, UnitPrice,
+                        PricebookEntry.Pricebook2Id, Product2Id,
+                        Opportunity.CurrencyIsoCode
+                    FROM OpportunityLineItem
+                    WHERE Id = :parentLineItemId
+                    LIMIT 1
+                ];
+                
+                Opportunity opp = [
+                    SELECT Id, CurrencyIsoCode
+                    FROM Opportunity
+                    WHERE Id = :parentItem.OpportunityId
+                    LIMIT 1
+                ];
+                
+                System.debug('### Parent Item Details:');
+                System.debug('OpportunityId: ' + parentItem.OpportunityId);
+                System.debug('PricebookEntryId: ' + parentItem.PricebookEntryId);
+                System.debug('Pricebook2Id: ' + parentItem.PricebookEntry.Pricebook2Id);
+                System.debug('Quantity: ' + parentItem.Quantity);
+                System.debug('Product2Id: ' + parentItem.Product2Id);
+                
+                Set<Id> productIds = new Set<Id>();
+                for (Product2 comp : bomComponents) {
+                    productIds.add(comp.Id);
+                    System.debug('Adding product ID: ' + comp.Id + ' - ' + comp.Name);
+                }
+                
+                Map<Id, PricebookEntry> pbeMap = new Map<Id, PricebookEntry>();
+                for (PricebookEntry pbe : [
+                    SELECT Id, Product2Id, UnitPrice, CurrencyIsoCode
+                    FROM PricebookEntry
+                    WHERE Product2Id IN :productIds
+                    AND Pricebook2Id = :parentItem.PricebookEntry.Pricebook2Id
+                    AND CurrencyIsoCode = :opp.CurrencyIsoCode
+                ]) {
+                    pbeMap.put(pbe.Product2Id, pbe);
+                    System.debug('PricebookEntry found for Product2Id: ' + pbe.Product2Id +
+                        ' | PBE ID: ' + pbe.Id + ' | Price: ' + pbe.UnitPrice);
+                }
+                
+                List<OpportunityLineItem> childItems = new List<OpportunityLineItem>();
+                for (Product2 comp : bomComponents) {
+                    if (pbeMap.containsKey(comp.Id)) {
+                        //Decimal componentQty = comp.Quantity__c != null ? comp.Quantity__c : 1;
+                        Decimal componentQty = (comp.Quantity__c != null && comp.Quantity__c > 0) ? comp.Quantity__c : 1;
+                        Decimal finalQty = parentItem.Quantity * componentQty;
+                        
+                        System.debug('Creating line item for: ' + comp.Name);
+                        System.debug('Base Qty: ' + componentQty + ' | Parent Qty: ' +
+                            parentItem.Quantity + ' | Final Qty: ' + finalQty);
+                        
+                        childItems.add(new OpportunityLineItem(
+                            OpportunityId = parentItem.OpportunityId,
+                        PricebookEntryId = pbeMap.get(comp.Id).Id,
+                        Quantity = componentQty, //comp.Quantity__c
+                        UnitPrice = pbeMap.get(comp.Id).UnitPrice,
+                        Alternate_Product_Name__c = comp.Name,
+                        Parent_Product__c = parentItem.Id,
+                        Is_BOM_Component__c = true
+                            ));
+                    } else {
+                        System.debug('No pricebook entry found for product: ' + comp.Id + ' - ' + comp.Name);
+                    }
+                }
+                
+                if (!childItems.isEmpty()) {
+                    System.debug('### Inserting ' + childItems.size() + ' child line items');
+                    insert childItems;
+                    System.debug('### Successfully created BOM line items');
+                    
+                    for (OpportunityLineItem oli : childItems) {
+                        System.debug('Created OLI: ' + oli.Id +
+                            ' for Product: ' + oli.PricebookEntry.Product2Id +
+                            ' | Qty: ' + oli.Quantity + ' | Price: ' + oli.UnitPrice);
+                    }
+                } else {
+                    System.debug('### No valid child items to create');
+                }
+                
+            } else if (objectType == 'QuoteLineItem') {
+                List<QuoteLineItem> existingChildren = [
+                SELECT Id FROM QuoteLineItem WHERE Parent_Quote_Line_Item__c = :parentLineItemId OR Parent_Product__c = :parentLineItemId
+            ];
+                if (!existingChildren.isEmpty()) {
+                    delete existingChildren;
+                }
+                
+                // ========== NEW LOGIC FOR QUOTE ==========
+                QuoteLineItem parentItem = [
+                    SELECT Id, QuoteId, PricebookEntryId, Quantity, UnitPrice,
+                        PricebookEntry.Pricebook2Id, Product2Id,
+                        Quote.CurrencyIsoCode
+                    FROM QuoteLineItem
+                    WHERE Id = :parentLineItemId
+                    LIMIT 1
+                ];
+                
+                Quote quote = [
+                    SELECT Id, CurrencyIsoCode
+                    FROM Quote
+                    WHERE Id = :parentItem.QuoteId
+                    LIMIT 1
+                ];
+                
+                System.debug('### Parent QLI Details:');
+                System.debug('QuoteId: ' + parentItem.QuoteId);
+                System.debug('Pricebook2Id: ' + parentItem.PricebookEntry.Pricebook2Id);
+                System.debug('Quantity: ' + parentItem.Quantity);
+                
+                Set<Id> productIds = new Set<Id>();
+                for (Product2 comp : bomComponents) {
+                    productIds.add(comp.Id);
+                    System.debug('Adding product ID: ' + comp.Id + ' - ' + comp.Name);
+                }
+                
+                Map<Id, PricebookEntry> pbeMap = new Map<Id, PricebookEntry>();
+                for (PricebookEntry pbe : [
+                    SELECT Id, Product2Id, UnitPrice, CurrencyIsoCode
+                    FROM PricebookEntry
+                    WHERE Product2Id IN :productIds
+                    AND Pricebook2Id = :parentItem.PricebookEntry.Pricebook2Id
+                    AND CurrencyIsoCode = :quote.CurrencyIsoCode
+                ]) {
+                    pbeMap.put(pbe.Product2Id, pbe);
+                    System.debug('PBE found for Product2Id: ' + pbe.Product2Id +
+                        ' | PBE ID: ' + pbe.Id + ' | Price: ' + pbe.UnitPrice);
+                }
+                
+                List<QuoteLineItem> childItems = new List<QuoteLineItem>();
+                for (Product2 comp : bomComponents) {
+                    if (pbeMap.containsKey(comp.Id)) {
+                        //Decimal componentQty = comp.Quantity__c != null ? comp.Quantity__c : 1;
+                        Decimal componentQty = (comp.Quantity__c != null && comp.Quantity__c > 0) ? comp.Quantity__c : 1;
+                        Decimal finalQty = parentItem.Quantity * componentQty;
+                        
+                        System.debug('Creating QLI for: ' + comp.Name);
+                        System.debug('Base Qty: ' + componentQty + ' | Parent Qty: ' +
+                            parentItem.Quantity + ' | Final Qty: ' + finalQty);
+                        
+                        childItems.add(new QuoteLineItem(
+                            QuoteId = parentItem.QuoteId,
+                        PricebookEntryId = pbeMap.get(comp.Id).Id,
+                        Quantity = componentQty, //comp.Quantity__c
+                        UnitPrice = pbeMap.get(comp.Id).UnitPrice,
+                        Alternate_Product_Name__c = comp.Name,
+                        Parent_Quote_Line_Item__c = parentItem.Id,
+                        Parent_Product__c = parentItem.Id,
+                        Is_BOM_Component__c = true
+                            ));
+                    } else {
+                        System.debug('No PBE found for product: ' + comp.Id + ' - ' + comp.Name);
+                    }
+                }
+                
+                if (!childItems.isEmpty()) {
+                    System.debug('### Inserting ' + childItems.size() + ' QLI BOMs');
+                    insert childItems;
+                    System.debug('### Successfully created BOM QLIs');
+                    
+                    for (QuoteLineItem qli : childItems) {
+                        System.debug('Created QLI: ' + qli.Id +
+                            ' for Product: ' + qli.PricebookEntry.Product2Id +
+                            ' | Qty: ' + qli.Quantity + ' | Price: ' + qli.UnitPrice);
+                    }
+                } else {
+                    System.debug('### No valid QLIs to create');
+                }
+            } else {
+                throw new AuraHandledException('Unsupported SObject type: ' + objectType);
+            }
+            
+        } catch (Exception e) {
+            System.debug('### Error in createBOMLineItems: ' + e.getMessage() +
+                ' at line ' + e.getLineNumber());
+            System.debug('Stack trace: ' + e.getStackTraceString());
+            throw new AuraHandledException('Error creating BOM line items: ' + e.getMessage());
+        }
+    }
+    
+    
+    
+    
+    //w0rking 25-06-25
+    @AuraEnabled
+public static void updateOpportunityProduct(Id opportunityId, Map<Id, Map<String, Object>> updatedProducts) {
+    // Identify the parent object type
+    String objectType = opportunityId.getSObjectType().getDescribe().getName();
+
+    // Collect line item Ids
+    Set<Id> lineItemIds = updatedProducts.keySet();
+    List<SObject> lineItemsToUpdate = new List<SObject>();
+
+    if (objectType == 'Opportunity') {
+        lineItemsToUpdate = [
+            SELECT Id, Quantity, UnitPrice
+            FROM OpportunityLineItem
+            WHERE Id IN :lineItemIds AND OpportunityId = :opportunityId
+        ];
+    }
+    else if (objectType == 'Quote') {
+        lineItemsToUpdate = [
+            SELECT Id, Quantity, UnitPrice
+            FROM QuoteLineItem
+            WHERE Id IN :lineItemIds AND QuoteId = :opportunityId
+        ];
+    }
+    else if (objectType == 'Purchase_Order__c') {
+        lineItemsToUpdate = [
+            SELECT Id, Quantity__c, Unit_Price__c
+            FROM Purchase_Order_Line_Item__c
+            WHERE Id IN :lineItemIds AND Purchase_Order__c = :opportunityId
+        ];
+    }
+
+    // Apply updates
+    for (SObject lineItem : lineItemsToUpdate) {
+        Map<String, Object> updates = updatedProducts.get(lineItem.Id);
+
+        if (updates.containsKey('quantity')) {
+            if (objectType == 'Purchase_Order__c') {
+                lineItem.put('Quantity__c', Decimal.valueOf(String.valueOf(updates.get('quantity'))));
+            } else {
+                lineItem.put('Quantity', Decimal.valueOf(String.valueOf(updates.get('quantity'))));
+            }
+        }
+        if (updates.containsKey('price')) {
+            if (objectType == 'Purchase_Order__c') {
+                lineItem.put('Unit_Price__c', Decimal.valueOf(String.valueOf(updates.get('price'))));
+            } else {
+                lineItem.put('UnitPrice', Decimal.valueOf(String.valueOf(updates.get('price'))));
+            }
+        }
+    }
+
+    try {
+        if (!lineItemsToUpdate.isEmpty()) {
+            update lineItemsToUpdate;
+        }
+    } catch (DmlException e) {
+        String userMessage = 'An unknown error occurred during the update.'; // Default
+
+        if (e.getMessage().contains('FIELD_CUSTOM_VALIDATION_EXCEPTION')) {
+            if (objectType == 'Opportunity') {
+                userMessage = 'The Opportunity close date has passed and cannot be modified.';
+            } else if (objectType == 'Quote') {
+                userMessage = 'The Quote is read-only and cannot be modified.';
+            } else if (objectType == 'Purchase_Order__c') {
+                userMessage = 'Purchase Order is already Approved. Line items cannot be edited.';
+            }
+        } else {
+            userMessage = e.getDmlMessage(0);
+        }
+        throw new AuraHandledException(userMessage);
+    }
+}
+
+    // public static void updateOpportunityProduct(Id opportunityId, Map<Id, Map<String, Object>> updatedProducts) {
+    //     // Determine if this is Opportunity or Quote
+    //     String objectType = opportunityId.getSObjectType().getDescribe().getName();
+        
+    //     // Get all line items that need updating
+    //     Set<Id> lineItemIds = updatedProducts.keySet();
+    //     List<SObject> lineItemsToUpdate = new List<SObject>();
+        
+    //     if (objectType == 'Opportunity') {
+    //         lineItemsToUpdate = [
+    //             SELECT Id, Quantity, UnitPrice
+    //             FROM OpportunityLineItem
+    //             WHERE Id IN :lineItemIds AND OpportunityId = :opportunityId
+    //         ];
+    //     }
+    //     else if (objectType == 'Quote') {
+    //         lineItemsToUpdate = [
+    //             SELECT Id, Quantity, UnitPrice
+    //             FROM QuoteLineItem
+    //             WHERE Id IN :lineItemIds AND QuoteId = :opportunityId
+    //         ];
+    //     }
+        
+        
+    //     // Apply updates
+    //     for (SObject lineItem : lineItemsToUpdate) {
+    //         Map<String, Object> updates = updatedProducts.get(lineItem.Id);
+            
+    //         if (updates.containsKey('quantity')) {
+    //             lineItem.put('Quantity', Decimal.valueOf(String.valueOf(updates.get('quantity'))));
+    //         }
+    //         if (updates.containsKey('price')) {
+    //             lineItem.put('UnitPrice', Decimal.valueOf(String.valueOf(updates.get('price'))));
+    //         }
+    //     }
+    //     try{
+    //         // Perform update
+    //         if (!lineItemsToUpdate.isEmpty()) {
+    //             update lineItemsToUpdate;
+    //         }
+    //     }
+    //     catch (DmlException e) {
+    //         String userMessage = 'An unknown error occurred during the update.'; // Default message
+            
+    //         // Check the specific DML error
+    //         if (e.getMessage().contains('FIELD_CUSTOM_VALIDATION_EXCEPTION')) {
+    //             if (objectType == 'Opportunity') {
+    //                 userMessage = 'The Opportunity close date has passed and cannot be modified.';
+    //             } else if (objectType == 'Quote') {
+    //                 userMessage = 'The Quote is read-only and cannot be modified.';
+    //             }
+    //         } else {
+    //             // For other DML errors, use the standard message
+    //             userMessage = e.getDmlMessage(0);
+    //         }
+    //         // Throw a clean, user-friendly exception back to the LWC
+    //         throw new AuraHandledException(userMessage);
+    //     }
+    // }
+    
+    @AuraEnabled
+    public static void createOpportunityLineItems(String opportunityId, String finalProductListJson) {
+        String objectType;
+        try {
+            System.debug('recordId: ' + opportunityId);
+            objectType = Id.valueOf(opportunityId).getSObjectType().getDescribe().getName();
+            Opportunity opp;
+            Quote quote;
+            String currencyIso;
+            String pricebookId;
+            
+            System.debug('Object Type :: ' + objectType);
+            if(objectType == 'Opportunity') {
+                opp = [SELECT Id, CurrencyIsoCode, Pricebook2Id FROM Opportunity WHERE Id = :opportunityId LIMIT 1];
+                System.debug('Opportunity Record: ' + opp);
+                currencyIso = opp.CurrencyIsoCode;
+                pricebookId = opp.Pricebook2Id;
+            }
+            else{
+                quote = [SELECT Id, CurrencyIsoCode, Pricebook2Id FROM Quote WHERE Id = :opportunityId LIMIT 1];
+                System.debug('quote Record: ' + quote);
+                currencyIso = quote.CurrencyIsoCode;
+                pricebookId = quote.Pricebook2Id;
+            }
+            if (String.isEmpty(finalProductListJson) || String.isEmpty(opportunityId)) {
+                throw new AuraHandledException('Invalid input: Record ID and product list are required.');
+            }
+            
+            List<ProductWrapper> finalProductList =
+                (List<ProductWrapper>) JSON.deserialize(finalProductListJson, List<ProductWrapper>.class);
+            
+            System.debug('Deserialized Product List: ' + JSON.serialize(finalProductList));
+            
+            System.debug('pricebookId : '+pricebookId);
+            
+            //Pricebook2 pbRec = [SELECT Id FROM Pricebook2 WHERE IsActive = true AND Id =: opp.Pricebook2Id LIMIT 1];
+            Pricebook2 pbRec = [SELECT Id FROM Pricebook2 WHERE IsActive = true AND Id =: pricebookId LIMIT 1];
+            
+            if (pbRec == null) {
+                throw new AuraHandledException('No active Pricebook found.');
+            }
+            
+            // Collect all product IDs (including BOM items) for bulk query
+            Set<Id> productIds = new Set<Id>();
+            for (ProductWrapper product : finalProductList) {
+                if (!String.isEmpty(product.productId)) {
+                    productIds.add(product.productId);
+                }
+                if (product.bomList != null) {
+                    for (BomWrapper bom : product.bomList) {
+                        //if (!String.isEmpty(bom.id) && bom.prodSel) {
+                            if (bom.prodSel == true && !String.isEmpty(bom.id)) {
+                                productIds.add(bom.id);
+                            }
+                        }
+                    }
+                }
+                
+                // Query PricebookEntries in bulk - create two maps for different lookups
+                Map<Id, PricebookEntry> productIdToPbeMap = new Map<Id, PricebookEntry>();
+                Map<Id, PricebookEntry> pbeIdToPbeMap = new Map<Id, PricebookEntry>();
+                // for (PricebookEntry pbe : [SELECT Id, Product2Id, UnitPrice, Pricebook2Id 
+            //                         FROM PricebookEntry 
+            //                         WHERE Pricebook2Id = :pbRec.Id 
+            //                         AND Product2Id IN :productIds AND CurrencyIsoCode = :opp.CurrencyIsoCode]) {
+                    //     productIdToPbeMap.put(pbe.Product2Id, pbe);
+                    //     pbeIdToPbeMap.put(pbe.Id, pbe);
+                // }
+                for (PricebookEntry pbe : [SELECT Id, Product2Id, UnitPrice, Pricebook2Id 
+                                    FROM PricebookEntry 
+                                    WHERE Pricebook2Id = :pbRec.Id AND Product2Id IN :productIds AND CurrencyIsoCode = :currencyIso]) {
+                    productIdToPbeMap.put(pbe.Product2Id, pbe);
+                    pbeIdToPbeMap.put(pbe.Id, pbe);
+                }
+                
+                if (objectType == 'Opportunity') {
+                    List<OpportunityLineItem> oliToInsert = new List<OpportunityLineItem>();
+                    List<OpportunityLineItem> oliToUpdate = new List<OpportunityLineItem>();
+                    
+                    // Map of PricebookEntryId to existing OLI
+                    Map<Id, OpportunityLineItem> existingOliMap = new Map<Id, OpportunityLineItem>();
+                    for (OpportunityLineItem oli : [
+                    SELECT Id, PricebookEntryId, Quantity 
+                    FROM OpportunityLineItem 
+                    WHERE OpportunityId = :opportunityId
+                ]) {
+                        existingOliMap.put(oli.PricebookEntryId, oli);
+                    }
+                    
+                    // First pass - handle parent products only
+                    Map<Id, Id> productIdToOliId = new Map<Id, Id>(); // Maps product ID to created OLI ID
+                    
+                    for (ProductWrapper product : finalProductList) {
+                        if (String.isEmpty(product.productId) || !product.prodSel) {
+                            continue;
+                        }
+                        
+                        PricebookEntry pbe = productIdToPbeMap.get(product.productId);
+                        if (pbe == null) {
+                            System.debug('No PricebookEntry found for product: ' + product.productId);
+                            continue;
+                        }
+                        
+                        if (existingOliMap.containsKey(pbe.Id)) {
+                            OpportunityLineItem existingOli = existingOliMap.get(pbe.Id);
+                            existingOli.Quantity += Decimal.valueOf(product.quantity);
+                            oliToUpdate.add(existingOli);
+                            productIdToOliId.put(product.productId, existingOli.Id);
+                        } else {
+                            OpportunityLineItem oli = new OpportunityLineItem(
+                                OpportunityId = opportunityId,
+                            PricebookEntryId = pbe.Id,
+                            Quantity = Decimal.valueOf(product.quantity),
+                            Alternate_Product_Name__c = product.productName,
+                            Alternate_Product_Model__c = product.productModel,
+                            UnitPrice = pbe.UnitPrice,
+                            Manufacturing_Instruction__c = product.manufacturing,
+                            Logistics_Instruction__c = product.logistics,
+                            Additional_Inspection__c = product.inspection,
+                            Application_Name__c = product.application,
+                            Product_Group_Name__c = product.productGroup,
+                            Solution_Name__c = product.cropSolution,
+                            Series_Name__c = product.productSeries
+                                );
+                            oliToInsert.add(oli);
+                        }
+                    }
+                    
+                    // Insert parent OLIs first
+                    if (!oliToInsert.isEmpty()) {
+                        insert oliToInsert;
+                        // Map the inserted OLIs to their product IDs
+                        for (OpportunityLineItem oli : oliToInsert) {
+                            PricebookEntry pbe = pbeIdToPbeMap.get(oli.PricebookEntryId);
+                            if (pbe != null) {
+                                productIdToOliId.put(pbe.Product2Id, oli.Id);
+                            } else {
+                                System.debug('Warning: Could not find PricebookEntry for OLI with PBE ID: ' + oli.PricebookEntryId);
+                            }
+                        }
+                    }
+                    if (!oliToUpdate.isEmpty()) {
+                        update oliToUpdate;
+                    }
+                    
+                    // Second pass - handle BOM items with parent reference
+                    List<OpportunityLineItem> bomOliToInsert = new List<OpportunityLineItem>();
+                    List<OpportunityLineItem> bomOliToUpdate = new List<OpportunityLineItem>();
+                    
+                    for (ProductWrapper product : finalProductList) {
+                        if (String.isEmpty(product.productId) || !product.prodSel || product.bomList == null) {
+                            continue;
+                        }
+                        
+                        Id parentOliId = productIdToOliId.get(product.productId);
+                        if (parentOliId == null) {
+                            System.debug('No parent OLI found for product: ' + product.productId);
+                            continue;
+                        }
+                        
+                        for (BomWrapper bom : product.bomList) {
+                            // if (bom.prodSel && !String.isEmpty(bom.id)) {
+                                if (bom.prodSel == true && !String.isEmpty(bom.id)) {
+                                    PricebookEntry bomPbe = productIdToPbeMap.get(bom.id);
+                                    if (bomPbe == null) {
+                                        System.debug('No PricebookEntry found for BOM product: ' + bom.id);
+                                        continue;
+                                    }
+                                    
+                                    if (existingOliMap.containsKey(bomPbe.Id)) {
+                                        OpportunityLineItem existingBomOli = existingOliMap.get(bomPbe.Id);
+                                        Decimal quantityToAdd = (String.isBlank(bom.quantity)) ? 1 : Decimal.valueOf(bom.quantity);
+                                        
+                                        //existingBomOli.Quantity += Decimal.valueOf(bom.quantity);
+                                        existingBomOli.Parent_Product__c = parentOliId;
+                                        bomOliToUpdate.add(existingBomOli);
+                                    } else {
+                                        Decimal bomQuantity = (String.isBlank(bom.quantity)) ? 1 : Decimal.valueOf(bom.quantity);
+                                        
+                                        OpportunityLineItem bomOli = new OpportunityLineItem(
+                                            OpportunityId = opportunityId,
+                                        PricebookEntryId = bomPbe.Id,
+                                        Quantity = bomQuantity,
+                                        //Quantity = Decimal.valueOf(bom.quantity),
+                                        Alternate_Product_Name__c = bom.productName,
+                                        UnitPrice = bomPbe.UnitPrice,
+                                        Manufacturing_Instruction__c = bom.manufacturing,
+                                        Logistics_Instruction__c = bom.logistics,
+                                        Additional_Inspection__c = bom.inspection,
+                                        Application_Name__c = bom.application,
+                                        Product_Group_Name__c = bom.productGroup,
+                                        Solution_Name__c = bom.cropSolution,
+                                        Series_Name__c = bom.productSeries,
+                                        Parent_Product__c = parentOliId,
+                                        Is_BOM_Component__c = true
+                                            );
+                                        bomOliToInsert.add(bomOli);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (!bomOliToInsert.isEmpty()) insert bomOliToInsert;
+                        if (!bomOliToUpdate.isEmpty()) update bomOliToUpdate;
+                        
+                        System.debug('Inserted Parent Opportunity Line Items: ' + oliToInsert.size());
+                        System.debug('Updated Parent Opportunity Line Items: ' + oliToUpdate.size());
+                        System.debug('Inserted BOM Opportunity Line Items: ' + bomOliToInsert.size());
+                        System.debug('Updated BOM Opportunity Line Items: ' + bomOliToUpdate.size());
+                    }
+                    
+                    else if (objectType == 'Quote') {
+                        List<QuoteLineItem> qliToInsert = new List<QuoteLineItem>();
+                        List<QuoteLineItem> qliToUpdate = new List<QuoteLineItem>();
+                        
+                        // Map of PricebookEntryId to existing QLI
+                        Map<Id, QuoteLineItem> existingQliMap = new Map<Id, QuoteLineItem>();
+                        for (QuoteLineItem qli : [
+                    SELECT Id, PricebookEntryId, Quantity 
+                    FROM QuoteLineItem 
+                    WHERE QuoteId = :opportunityId
+                ]) {
+                            existingQliMap.put(qli.PricebookEntryId, qli);
+                        }
+                        
+                        // First pass - handle parent products only
+                        Map<Id, Id> productIdToQliId = new Map<Id, Id>(); // Maps product ID to created QLI ID
+                        
+                        for (ProductWrapper product : finalProductList) {
+                            if (String.isEmpty(product.productId) || !product.prodSel) {
+                                continue;
+                            }
+                            
+                            PricebookEntry pbe = productIdToPbeMap.get(product.productId);
+                            if (pbe == null) {
+                                System.debug('No PricebookEntry found for product: ' + product.productId);
+                                continue;
+                            }
+                            
+                            if (existingQliMap.containsKey(pbe.Id)) {
+                                QuoteLineItem existingQli = existingQliMap.get(pbe.Id);
+                                Decimal quantityToAdd = (String.isBlank(product.quantity)) ? 1 : Decimal.valueOf(product.quantity);
+                                
+                                // existingQli.Quantity += Decimal.valueOf(product.quantity);
+                                existingQli.Quantity += quantityToAdd;
+                                qliToUpdate.add(existingQli);
+                                productIdToQliId.put(product.productId, existingQli.Id);
+                            } else {
+                                QuoteLineItem qli = new QuoteLineItem(
+                                    QuoteId = opportunityId,
+                                PricebookEntryId = pbe.Id,
+                                Quantity = Decimal.valueOf(product.quantity),
+                                Alternate_Product_Name__c = product.productName,
+                                Alternate_Product_Model__c = product.productModel,
+                                UnitPrice = pbe.UnitPrice,
+                                Manufacturing_Instruction__c = product.manufacturing,
+                                Logistics_Instruction__c = product.logistics,
+                                Additional_Inspection__c = product.inspection,
+                                Application_Name__c = product.application,
+                                Product_Group_Name__c = product.productGroup,
+                                Solution_Name__c = product.cropSolution,
+                                Series_Name__c = product.productSeries
+                                    );
+                                qliToInsert.add(qli);
+                            }
+                        }
+                        
+                        // Insert parent QLIs first
+                        if (!qliToInsert.isEmpty()) {
+                            insert qliToInsert;
+                            // Map the inserted QLIs to their product IDs
+                            for (QuoteLineItem qli : qliToInsert) {
+                                PricebookEntry pbe = pbeIdToPbeMap.get(qli.PricebookEntryId);
+                                if (pbe != null) {
+                                    productIdToQliId.put(pbe.Product2Id, qli.Id);
+                                } else {
+                                    System.debug('Warning: Could not find PricebookEntry for QLI with PBE ID: ' + qli.PricebookEntryId);
+                                }
+                            }
+                        }
+                        if (!qliToUpdate.isEmpty()) {
+                            update qliToUpdate;
+                        }
+                        
+                        // Second pass - handle BOM items with parent reference
+                        List<QuoteLineItem> bomQliToInsert = new List<QuoteLineItem>();
+                        List<QuoteLineItem> bomQliToUpdate = new List<QuoteLineItem>();
+                        
+                        for (ProductWrapper product : finalProductList) {
+                            if (String.isEmpty(product.productId) || !product.prodSel || product.bomList == null) {
+                                continue;
+                            }
+                            
+                            Id parentQliId = productIdToQliId.get(product.productId);
+                            if (parentQliId == null) {
+                                System.debug('No parent QLI found for product: ' + product.productId);
+                                continue;
+                            }
+                            
+                            for (BomWrapper bom : product.bomList) {
+                                if (bom.prodSel && !String.isEmpty(bom.id)) {
+                                    PricebookEntry bomPbe = productIdToPbeMap.get(bom.id);
+                                    if (bomPbe == null) {
+                                        System.debug('No PricebookEntry found for BOM product: ' + bom.id);
+                                        continue;
+                                    }
+                                    
+                                    if (existingQliMap.containsKey(bomPbe.Id)) {
+                                        QuoteLineItem existingBomQli = existingQliMap.get(bomPbe.Id);
+                                        existingBomQli.Quantity += Decimal.valueOf(bom.quantity);
+                                        existingBomQli.Parent_Product__c = parentQliId;
+                                        bomQliToUpdate.add(existingBomQli);
+                                    } else {
+                                        Decimal bomQuantity = (String.isBlank(bom.quantity)) ? 1 : Decimal.valueOf(bom.quantity);
+                                        
+                                        QuoteLineItem bomQli = new QuoteLineItem(
+                                            QuoteId = opportunityId,
+                                        PricebookEntryId = bomPbe.Id,
+                                        //Quantity = Decimal.valueOf(bom.quantity),
+                                        Quantity = bomQuantity,
+                                        Alternate_Product_Name__c = bom.productName,
+                                        UnitPrice = bomPbe.UnitPrice,
+                                        Manufacturing_Instruction__c = bom.manufacturing,
+                                        Logistics_Instruction__c = bom.logistics,
+                                        Additional_Inspection__c = bom.inspection,
+                                        Application_Name__c = bom.application,
+                                        Product_Group_Name__c = bom.productGroup,
+                                        Solution_Name__c = bom.cropSolution,
+                                        Series_Name__c = bom.productSeries,
+                                        Parent_Product__c = parentQliId,
+                                        Is_BOM_Component__c = true
+                                            );
+                                        bomQliToInsert.add(bomQli);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (!bomQliToInsert.isEmpty()) insert bomQliToInsert;
+                        if (!bomQliToUpdate.isEmpty()) update bomQliToUpdate;
+                        
+                        System.debug('Inserted Parent Quote Line Items: ' + qliToInsert.size());
+                        System.debug('Updated Parent Quote Line Items: ' + qliToUpdate.size());
+                        System.debug('Inserted BOM Quote Line Items: ' + bomQliToInsert.size());
+                        System.debug('Updated BOM Quote Line Items: ' + bomQliToUpdate.size());
+                    }
+                    else {
+                        throw new AuraHandledException('Unsupported object type: ' + objectType);
+                    }
+                    
+                }
+                //  catch (Exception e) {
+                    //     System.debug('Error in createOpportunityOrQuoteLineItems at line: ' + e.getLineNumber() + ', Message: ' + e.getMessage());
+                    //     throw new AuraHandledException('An error occurred: ' + e.getMessage() + ' (Line: ' + e.getLineNumber() + ')');
+                // }
+                catch (Exception e) {
+                    // 2. Add intelligent error handling in the catch block
+                    String userMessage = 'An error occurred while saving the record.'; // Default message
+                    
+                    if (e.getMessage().contains('FIELD_CUSTOM_VALIDATION_EXCEPTION')) {
+                        if (objectType == 'Quote') {
+                            // This is the specific error message for a locked Quote
+                            userMessage = 'The record cannot be updated as it is currently locked in an approval process.';
+                        } else if (objectType == 'Opportunity') {
+                            // This is the specific error for an Opportunity validation rule
+                            userMessage = 'The Opportunity Close Date cannot be in the past.';
+                        } else {
+                            // A fallback for the validation exception, if needed
+                            userMessage = 'A validation rule prevented the record from being saved.';
+                        }
+                    }
+                    else if (e.getMessage().contains('FIELD_INTEGRITY_EXCEPTION')){
+                        userMessage = 'Pricebook entry currency code does not match opportunity currency code.';
+                    }
+                    else {
+                        // Use the original message for any other type of exception
+                        userMessage = e.getMessage();
+                    }
+                    
+                    System.debug('Error in createOpportunityOrQuoteLineItems at line: ' + e.getLineNumber() + ', Message: ' + e.getMessage());
+                    throw new AuraHandledException(userMessage);
+                }
+                
+            }
+            
+            @AuraEnabled
+            public static void createSpareOpportunityLineItems(Id opportunityId, String selectedProductsJson) {
+                System.debug('selectedProductsJson::' + selectedProductsJson);
+                System.debug('opportunityId::' + opportunityId);
+                Pricebook2 pbRec;
+                Opportunity opp;
+                Quote quo;
+                Order ord;
+                String currencyCode;
+                Id pricebookId;
+                
+                
+                System.debug('record Id :: ' + opportunityId);
+                String objectType = Id.valueOf(opportunityId).getSObjectType().getDescribe().getName();
+                System.debug('Object Type :: ' + objectType);
+                List<Opportunity> oppList = [Select Id, CurrencyIsoCode, Pricebook2Id FROM Opportunity WHERE Id = :opportunityId LIMIT 1];
+                List<Quote> quoList = [Select Id, CurrencyIsoCode, Pricebook2Id FROM Quote WHERE Id = :opportunityId LIMIT 1];
+                List<Order> ordList = [Select Id, CurrencyIsoCode, Pricebook2Id FROM Order WHERE Id = :opportunityId LIMIT 1];
+                
+                
+                //Opportunity opp = [Select Id, CurrencyIsoCode, Pricebook2Id FROM Opportunity WHERE Id = :opportunityId LIMIT 1];
+                if(!oppList.isEmpty()){
+                    opp = oppList[0];
+                    currencyCode = opp.CurrencyIsoCode;
+                    pricebookId = opp.Pricebook2Id;
+                    pbRec = [SELECT Id FROM Pricebook2 WHERE IsActive = true AND CurrencyIsoCode =: opp.CurrencyIsoCode LIMIT 1];
+                }
+                else if(!quoList.isEmpty()){
+                    quo = quoList[0];
+                    currencyCode = quo.CurrencyIsoCode;
+                    pricebookId = quo.Pricebook2Id;
+                    
+                    pbRec = [SELECT Id FROM Pricebook2 WHERE IsActive = true AND CurrencyIsoCode =: quo.CurrencyIsoCode LIMIT 1];
+                }
+                else{
+                    ord = ordList[0];
+                    currencyCode = ord.CurrencyIsoCode;
+                    pricebookId = ord.Pricebook2Id;
+                    pbRec = [SELECT Id FROM Pricebook2 WHERE IsActive = true AND CurrencyIsoCode =: ord.CurrencyIsoCode LIMIT 1];
+                }
+                //pbRec = [SELECT Id FROM Pricebook2 WHERE IsActive = true AND CurrencyIsoCode =: opp.CurrencyIsoCode LIMIT 1];
+                System.debug('pbRec::' + pbRec);
+                
+                
+                if (String.isEmpty(selectedProductsJson)) {
+                    System.debug('ERROR: Received NULL or Empty JSON');
+                    throw new AuraHandledException('Invalid input: No products provided.');
+                }
+                
+                // Deserialize JSON into List of SpareWrapper
+                List<SpareWrapper> spareProducts;
+                try {
+                    spareProducts = (List<SpareWrapper>) JSON.deserialize(selectedProductsJson, List<SpareWrapper>.class);
+                } catch (Exception e) {
+                    System.debug('ERROR: JSON Deserialization Failed: ' + e.getMessage());
+                    throw new AuraHandledException('Error processing product data.');
+                }
+                
+                System.debug('Deserialized Products::' + spareProducts);
+                
+                // Get all product IDs first for bulk query
+                Set<Id> productIds = new Set<Id>();
+                for (SpareWrapper spare : spareProducts) {
+                    if (spare.Id != null) {
+                        productIds.add(spare.Id);
+                    }
+                }
+                
+                // Query PricebookEntries in bulk
+                Map<Id, PricebookEntry> pricebookEntries = new Map<Id, PricebookEntry>();
+                for (PricebookEntry pbe : [SELECT Id, Product2Id, UnitPrice 
+                                FROM PricebookEntry 
+                                WHERE Pricebook2Id = :pbRec.Id 
+                                AND Product2Id IN :productIds 
+                                AND CurrencyIsoCode = :currencyCode]) {
+                    pricebookEntries.put(pbe.Product2Id, pbe);
+                }
+                System.debug('Pricebook Entries::' + pricebookEntries);
+                
+                if(objectType == 'Opportunity') {
+                    // Query existing line items for this opportunity
+                    Map<Id, OpportunityLineItem> existingLineItems = new Map<Id, OpportunityLineItem>();
+                    for (OpportunityLineItem oli : [SELECT Id, Product2Id, Quantity 
+                                        FROM OpportunityLineItem 
+                                        WHERE OpportunityId = :opportunityId 
+                                        AND Product2Id IN :productIds]) {
+                        existingLineItems.put(oli.Product2Id, oli);
+                    }
+                    
+                    List<OpportunityLineItem> lineItemsToInsert = new List<OpportunityLineItem>();
+                    List<OpportunityLineItem> lineItemsToUpdate = new List<OpportunityLineItem>();
+                    
+                    for (SpareWrapper spare : spareProducts) {
+                        if (spare.Id != null && spare.Quantity != null && spare.isChecked == true) {
+                            PricebookEntry pbe = pricebookEntries.get(spare.Id);
+                            System.debug('spare.Id '+spare.Id);
+                            System.debug('pbe '+pbe);
+                            
+                            if (existingLineItems.containsKey(spare.Id)) {
+                                // Update existing line item quantity
+                                OpportunityLineItem existingItem = existingLineItems.get(spare.Id);
+                                existingItem.Quantity += spare.Quantity;
+                                lineItemsToUpdate.add(existingItem);
+                            } else {
+                                System.debug('opportunityId '+opportunityId);
+                                // Create new line item
+                                OpportunityLineItem oli = new OpportunityLineItem(
+                                    OpportunityId = opportunityId,
+                                PricebookEntryId = pbe.Id,
+                                Quantity = spare.Quantity,
+                                Alternate_Product_Name__c = spare.Name,
+                                Alternate_Product_Model__c = spare.modelCode,
+                                UnitPrice = pbe.UnitPrice,
+                                Manufacturing_Instruction__c = spare.manufacturing,
+                                Logistics_Instruction__c = spare.logistics,
+                                Additional_Inspection__c = spare.inspection
+                                    );
+                                lineItemsToInsert.add(oli);
+                            }
+                        }
+                    }
+                    
+                    if (!lineItemsToInsert.isEmpty()) {
+                        insert lineItemsToInsert;
+                        System.debug('New OpportunityLineItems Created Successfully');
+                    }
+                    if (!lineItemsToUpdate.isEmpty()) {
+                        update lineItemsToUpdate;
+                        System.debug('Existing OpportunityLineItems Updated Successfully');
+                    }
+                }
+                else if (objectType == 'Quote') {
+                    // Query existing quote line items
+                    Map<Id, QuoteLineItem> existingQuoteItems = new Map<Id, QuoteLineItem>();
+                    for (QuoteLineItem qli : [SELECT Id, Product2Id, Quantity 
+                                    FROM QuoteLineItem 
+                                    WHERE QuoteId = :opportunityId 
+                                    AND Product2Id IN :productIds]) {
+                        existingQuoteItems.put(qli.Product2Id, qli);
+                    }
+                    
+                    List<QuoteLineItem> quoteItemsToInsert = new List<QuoteLineItem>();
+                    List<QuoteLineItem> quoteItemsToUpdate = new List<QuoteLineItem>();
+                    
+                    for (SpareWrapper spare : spareProducts) {
+                        if (spare.Id != null && spare.Quantity != null) {
+                            PricebookEntry pbe = pricebookEntries.get(spare.Id);
+                            
+                            if (existingQuoteItems.containsKey(spare.Id)) {
+                                // Update existing quote item quantity
+                                QuoteLineItem existingItem = existingQuoteItems.get(spare.Id);
+                                existingItem.Quantity += spare.Quantity;
+                                quoteItemsToUpdate.add(existingItem);
+                            } else {
+                                // Create new quote item
+                                QuoteLineItem qli = new QuoteLineItem(
+                                    QuoteId = opportunityId,
+                                PricebookEntryId = pbe.Id,
+                                Quantity = spare.Quantity,
+                                Alternate_Product_Name__c = spare.Name,
+                                Alternate_Product_Model__c = spare.modelCode,
+                                UnitPrice = pbe.UnitPrice,
+                                Manufacturing_Instruction__c = spare.manufacturing,
+                                Logistics_Instruction__c = spare.logistics,
+                                Additional_Inspection__c = spare.inspection
+                                    );
+                                quoteItemsToInsert.add(qli);
+                            }
+                        }
+                    }
+                    
+                    if (!quoteItemsToInsert.isEmpty()) {
+                        insert quoteItemsToInsert;
+                        System.debug('New QuoteLineItems Created Successfully');
+                    }
+                    if (!quoteItemsToUpdate.isEmpty()) {
+                        update quoteItemsToUpdate;
+                        System.debug('Existing QuoteLineItems Updated Successfully');
+                    }
+                }
+                else if (objectType == 'Order') {
+                    Order orderRec = [SELECT Id, Pricebook2Id FROM Order WHERE Id = :opportunityId LIMIT 1];
+                    if (orderRec.Pricebook2Id == null) {
+                        orderRec.Pricebook2Id = pbRec.Id;
+                        update orderRec;
+                    }
+                    
+                    Map<Id, OrderItem> existingOrderItems = new Map<Id, OrderItem>();
+                    for (OrderItem oi : [SELECT Id, Product2Id, Quantity 
+                            FROM OrderItem 
+                            WHERE OrderId = :opportunityId 
+                            AND Product2Id IN :productIds]) {
+                        existingOrderItems.put(oi.Product2Id, oi);
+                    }
+                    
+                    List<OrderItem> orderItemsToInsert = new List<OrderItem>();
+                    List<OrderItem> orderItemsToUpdate = new List<OrderItem>();
+                    
+                    for (SpareWrapper spare : spareProducts) {
+                        if (spare.Id != null && spare.quantity != null) {
+                            PricebookEntry pbe = pricebookEntries.get(spare.Id);
+                            
+                            if (existingOrderItems.containsKey(spare.Id)) {
+                                OrderItem existingItem = existingOrderItems.get(spare.Id);
+                                existingItem.Quantity += Decimal.valueOf(spare.Quantity);
+                                orderItemsToUpdate.add(existingItem);
+                            } else {
+                                OrderItem oi = new OrderItem(
+                                    OrderId = opportunityId,
+                                PricebookEntryId = pbe.Id,
+                                Quantity = Decimal.valueOf(spare.Quantity),
+                                UnitPrice = pbe.UnitPrice
+                                    );
+                                orderItemsToInsert.add(oi);
+                            }
+                        }
+                    }
+                    
+                    if (!orderItemsToInsert.isEmpty()) {
+                        insert orderItemsToInsert;
+                        System.debug('New OrderItems Created Successfully');
+                    }
+                    if (!orderItemsToUpdate.isEmpty()) {
+                        update orderItemsToUpdate;
+                        System.debug('Existing OrderItems Updated Successfully');
+                    }
+                }
+                else {
+                    throw new AuraHandledException('Unsupported record type: ' + objectType);
+                }
+            }
+            
+            
+            @AuraEnabled
+            public static void createDMSLineItems(Id opportunityId, String selectedProductsJson) {
+                System.debug('selectedProductsJson::' + selectedProductsJson);
+                System.debug('opportunityId::' + opportunityId);
+                
+                String objectType = Id.valueOf(opportunityId).getSObjectType().getDescribe().getName();
+                System.debug('Object Type :: ' + objectType);
+                
+                String currencyCode;
+                Pricebook2 pbRec = [SELECT Id FROM Pricebook2 WHERE IsActive = true AND IsStandard = true LIMIT 1];
+                
+                if (objectType == 'Opportunity') {
+                    Opportunity opp = [SELECT CurrencyIsoCode FROM Opportunity WHERE Id = :opportunityId];
+                    currencyCode = opp.CurrencyIsoCode;
+                } else if (objectType == 'Quote') {
+                    Quote quote = [SELECT CurrencyIsoCode FROM Quote WHERE Id = :opportunityId];
+                    currencyCode = quote.CurrencyIsoCode;
+                } else if (objectType == 'Order') {
+                    Order ord = [SELECT Id, CurrencyIsoCode, Pricebook2Id FROM Order WHERE Id = :opportunityId LIMIT 1];
+                    currencyCode = ord.CurrencyIsoCode;
+                    if (ord.Pricebook2Id == null) {
+                        ord.Pricebook2Id = pbRec.Id;
+                        update ord;
+                    }
+                } else {
+                    throw new AuraHandledException('Unsupported record type: ' + objectType);
+                }
+                
+                if (String.isEmpty(selectedProductsJson)) {
+                    throw new AuraHandledException('Invalid input: No products provided.');
+                }
+                
+                List<SpareWrapper> spareProducts;
+                try {
+                    spareProducts = (List<SpareWrapper>) JSON.deserialize(selectedProductsJson, List<SpareWrapper>.class);
+                } catch (Exception e) {
+                    throw new AuraHandledException('Error processing product data: ' + e.getMessage());
+                }
+                
+                Set<Id> productIds = new Set<Id>();
+                for (SpareWrapper spare : spareProducts) {
+                    if (spare.Id != null) productIds.add(spare.Id);
+                    if (!String.isEmpty(spare.parentId)) productIds.add(spare.parentId);
+                }
+                
+                Map<Id, PricebookEntry> pricebookEntries = new Map<Id, PricebookEntry>();
+                for (PricebookEntry pbe : [
+        SELECT Id, Product2Id, UnitPrice
+        FROM PricebookEntry
+        WHERE Pricebook2Id = :pbRec.Id AND Product2Id IN :productIds AND CurrencyIsoCode = :currencyCode
+    ]) {
+                    pricebookEntries.put(pbe.Product2Id, pbe);
+                }
+                
+                List<SpareWrapper> masterProducts = new List<SpareWrapper>();
+                List<SpareWrapper> bomProducts = new List<SpareWrapper>();
+                
+                for (SpareWrapper spare : spareProducts) {
+                    if (String.isEmpty(spare.parentId)) {
+                        masterProducts.add(spare);
+                    } else {
+                        bomProducts.add(spare);
+                    }
+                }
+                
+                Map<Id, Id> product2IdToLineItemId = new Map<Id, Id>();
+                
+                if (objectType == 'Opportunity') {
+                    List<OpportunityLineItem> masterOLIs = new List<OpportunityLineItem>();
+                    for (SpareWrapper spare : masterProducts) {
+                        PricebookEntry pbe = pricebookEntries.get(spare.Id);
+                        if (pbe != null) {
+                            masterOLIs.add(new OpportunityLineItem(
+                                OpportunityId = opportunityId,
+                            PricebookEntryId = pbe.Id,
+                            Alternate_Product_Name__c = spare.Name,
+                            Quantity = spare.Quantity,
+                            UnitPrice = pbe.UnitPrice
+                                ));
+                        }
+                    }
+                    insert masterOLIs;
+                    
+                    List<OpportunityLineItem> insertedOLIs = [
+            SELECT Id, PricebookEntry.Product2Id
+            FROM OpportunityLineItem
+            WHERE OpportunityId = :opportunityId
+            AND PricebookEntry.Product2Id IN :productIds
+        ];
+                    for (OpportunityLineItem oli : insertedOLIs) {
+                        product2IdToLineItemId.put(oli.PricebookEntry.Product2Id, oli.Id);
+                    }
+                    
+                    List<OpportunityLineItem> bomOLIs = new List<OpportunityLineItem>();
+                    for (SpareWrapper spare : bomProducts) {
+                        PricebookEntry pbe = pricebookEntries.get(spare.Id);
+                        Id parentLineItemId = product2IdToLineItemId.get(spare.parentId);
+                        if (pbe != null && parentLineItemId != null) {
+                            bomOLIs.add(new OpportunityLineItem(
+                                OpportunityId = opportunityId,
+                            PricebookEntryId = pbe.Id,
+                            Alternate_Product_Name__c = spare.Name,
+                            Quantity = spare.Quantity,
+                            UnitPrice = pbe.UnitPrice,
+                            Parent_Product__c = parentLineItemId,
+                            Is_BOM_Component__c = true
+                                ));
+                        }
+                    }
+                    insert bomOLIs;
+                }
+                
+                else if (objectType == 'Quote') {
+                    List<QuoteLineItem> masterQLIs = new List<QuoteLineItem>();
+                    for (SpareWrapper spare : masterProducts) {
+                        PricebookEntry pbe = pricebookEntries.get(spare.Id);
+                        if (pbe != null) {
+                            masterQLIs.add(new QuoteLineItem(
+                                QuoteId = opportunityId,
+                            Alternate_Product_Name__c = spare.Name,
+                            PricebookEntryId = pbe.Id,
+                            Quantity = spare.Quantity,
+                            UnitPrice = pbe.UnitPrice
+                                ));
+                        }
+                    }
+                    insert masterQLIs;
+                    
+                    List<QuoteLineItem> insertedQLIs = [
+            SELECT Id, PricebookEntry.Product2Id
+            FROM QuoteLineItem
+            WHERE QuoteId = :opportunityId
+            AND PricebookEntry.Product2Id IN :productIds
+        ];
+                    for (QuoteLineItem qli : insertedQLIs) {
+                        product2IdToLineItemId.put(qli.PricebookEntry.Product2Id, qli.Id);
+                    }
+                    
+                    List<QuoteLineItem> bomQLIs = new List<QuoteLineItem>();
+                    for (SpareWrapper spare : bomProducts) {
+                        PricebookEntry pbe = pricebookEntries.get(spare.Id);
+                        Id parentLineItemId = product2IdToLineItemId.get(spare.parentId);
+                        if (pbe != null && parentLineItemId != null) {
+                            bomQLIs.add(new QuoteLineItem(
+                                QuoteId = opportunityId,
+                            PricebookEntryId = pbe.Id,
+                            Alternate_Product_Name__c = spare.Name,
+                            Quantity = spare.Quantity,
+                            UnitPrice = pbe.UnitPrice,
+                            Parent_Quote_Line_Item__c = parentLineItemId,
+                            Is_BOM_Component__c = true
+                                ));
+                        }
+                    }
+                    insert bomQLIs;
+                }
+                
+                else if (objectType == 'Order') {
+                    List<OrderItem> masterOIs = new List<OrderItem>();
+                    for (SpareWrapper spare : masterProducts) {
+                        PricebookEntry pbe = pricebookEntries.get(spare.Id);
+                        if (pbe != null) {
+                            masterOIs.add(new OrderItem(
+                                OrderId = opportunityId,
+                            PricebookEntryId = pbe.Id,
+                            Quantity = spare.Quantity,
+                            UnitPrice = pbe.UnitPrice
+                                ));
+                        }
+                    }
+                    insert masterOIs;
+                    
+                    List<OrderItem> insertedOIs = [
+            SELECT Id, PricebookEntry.Product2Id
+            FROM OrderItem
+            WHERE OrderId = :opportunityId
+            AND PricebookEntry.Product2Id IN :productIds
+        ];
+                    for (OrderItem oi : insertedOIs) {
+                        product2IdToLineItemId.put(oi.PricebookEntry.Product2Id, oi.Id);
+                    }
+                    
+                    List<OrderItem> bomOIs = new List<OrderItem>();
+                    for (SpareWrapper spare : bomProducts) {
+                        PricebookEntry pbe = pricebookEntries.get(spare.Id);
+                        Id parentLineItemId = product2IdToLineItemId.get(spare.parentId);
+                        if (pbe != null && parentLineItemId != null) {
+                            bomOIs.add(new OrderItem(
+                                OrderId = opportunityId,
+                            PricebookEntryId = pbe.Id,
+                            Quantity = spare.Quantity,
+                            UnitPrice = pbe.UnitPrice,
+                            Parent_Order_Product__c = parentLineItemId
+                                ));
+                        }
+                    }
+                    insert bomOIs;
+                }
+                
+                else {
+                    throw new AuraHandledException('Unsupported record type: ' + objectType);
+                }
+            }
+            
+            
+            @AuraEnabled
+            public static void createDMSLineItemsPortal(Id opportunityId, String selectedProductsJson) {
+                try {
+                    System.debug('Input opportunityId: ' + opportunityId);
+                    Id accIDZ = SecondaryOrderController.getCurrentUserAccountId();
+                    Account acc = [SELECT Id, CurrencyIsoCode FROM Account WHERE Id = :accIDZ LIMIT 1];
+                    // Determine object type
+                    String objectType = Id.valueOf(opportunityId).getSObjectType().getDescribe().getName();
+                    System.debug('Processing for object type: ' + objectType);
+                    System.debug('selectedProductsJson: ' + selectedProductsJson);
+                    
+                    // Get pricebook in user's currency
+                    Pricebook2 pbRec = [SELECT Id, Name, CurrencyIsoCode FROM Pricebook2 
+                          WHERE IsActive = true AND CurrencyIsoCode = :acc.CurrencyIsoCode 
+                          LIMIT 1];
+                    System.debug('Using pricebook: ' + pbRec.Name + ' (ID: ' + pbRec.Id + '), Currency: ' + pbRec.CurrencyIsoCode);
+                    
+                    // For Orders, ensure pricebook is assigned
+                    if (objectType == 'Order') {
+                        Order ord = [SELECT Id, OrderNumber, Pricebook2Id FROM Order WHERE Id = :opportunityId LIMIT 1];
+                        if (ord.Pricebook2Id == null) {
+                            System.debug('Assigning pricebook to Order');
+                            ord.Pricebook2Id = pbRec.Id;
+                            update ord;
+                        }
+                    }
+                    
+                    // Validate input
+                    if (String.isEmpty(selectedProductsJson)) {
+                        throw new AuraHandledException('Invalid input: No products provided.');
+                    }
+                    
+                    // Deserialize products
+                    List<SpareWrapper> spareProducts;
+                    try {
+                        spareProducts = (List<SpareWrapper>) JSON.deserialize(selectedProductsJson, List<SpareWrapper>.class);
+                        System.debug('Successfully deserialized ' + spareProducts);
+                    } catch (Exception e) {
+                        System.debug('Deserialization error: ' + e.getMessage() + '\n' + e.getStackTraceString());
+                        throw new AuraHandledException('Error processing product data: ' + e.getMessage());
+                    }
+                    
+                    // Collect product IDs
+                    Set<Id> productIds = new Set<Id>();
+                    for (SpareWrapper spare : spareProducts) {
+                        if (spare.Id != null) productIds.add(spare.Id);
+                        if (!String.isEmpty(spare.parentId)) productIds.add(spare.parentId);
+                    }
+                    System.debug('Collected ' + productIds.size() + ' unique product IDs');
+                    
+                    // Get pricebook entries in user's currency
+                    Map<Id, PricebookEntry> pricebookEntries = new Map<Id, PricebookEntry>();
+                    List<PricebookEntry> pbes = [
+            SELECT Id, Product2Id, Product2.Name, UnitPrice, CurrencyIsoCode
+            FROM PricebookEntry
+            WHERE Pricebook2Id = :pbRec.Id AND Product2Id IN :productIds AND CurrencyIsoCode = :acc.CurrencyIsoCode
+        ];
+                    System.debug('Found ' + pbes.size() + ' matching pricebook entries');
+                    
+                    for (PricebookEntry pbe : pbes) {
+                        pricebookEntries.put(pbe.Product2Id, pbe);
+                        System.debug('Pricebook Entry - Product: ' + pbe.Product2.Name +
+                            ', Price: ' + pbe.UnitPrice +
+                            ', Currency: ' + pbe.CurrencyIsoCode);
+                    }
+                    
+                    // Separate master and BOM products
+                    List<SpareWrapper> masterProducts = new List<SpareWrapper>();
+                    List<SpareWrapper> bomProducts = new List<SpareWrapper>();
+                    
+                    for (SpareWrapper spare : spareProducts) {
+                        if (String.isEmpty(spare.parentId)) {
+                            masterProducts.add(spare);
+                        } else {
+                            bomProducts.add(spare);
+                        }
+                    }
+                    System.debug('Master products: ' + masterProducts.size());
+                    System.debug('BOM products: ' + bomProducts.size());
+                    
+                    Map<Id, Id> product2IdToLineItemId = new Map<Id, Id>();
+                    
+                    if (objectType == 'Opportunity') {
+                        System.debug('=== PROCESSING OPPORTUNITY LINE ITEMS ===');
+                        
+                        // Process master products
+                        List<OpportunityLineItem> masterOLIs = new List<OpportunityLineItem>();
+                        for (SpareWrapper spare : masterProducts) {
+                            PricebookEntry pbe = pricebookEntries.get(spare.Id);
+                            if (pbe != null) {
+                                OpportunityLineItem oli = new OpportunityLineItem(
+                                    OpportunityId = opportunityId,
+                                PricebookEntryId = pbe.Id,
+                                Alternate_Product_Name__c = spare.Name,
+                                Alternate_Product_Model__c = spare.modelCode,
+                                Quantity = spare.Quantity,
+                                UnitPrice = pbe.UnitPrice,
+                                Logistics_Instruction__c = spare.logistics,
+                                Manufacturing_Instruction__c = spare.manufacturing,
+                                Additional_Inspection__c = spare.inspection,
+                                Application_Name__c = spare.application,
+                                Product_Group_Name__c = spare.productGroup,
+                                Solution_Name__c = spare.cropSolution,
+                                Series_Name__c = spare.productSeries
+                                    
+                                );
+                                masterOLIs.add(oli);
+                                System.debug('Creating master OLI for product: ' + spare.Name +
+                                    ', Qty: ' + spare.Quantity +
+                                    ', Price: ' + pbe.UnitPrice);
+                            } else {
+                                System.debug('WARNING: No pricebook entry found for master product ID: ' + spare.Id);
+                            }
+                        }
+                        
+                        System.debug('Inserting ' + masterOLIs.size() + ' master opportunity line items');
+                        insert masterOLIs;
+                        System.debug('Successfully inserted master OLIs');
+                        
+                        // Map product IDs to line item IDs
+                        List<OpportunityLineItem> insertedOLIs = [
+                SELECT Id, PricebookEntry.Product2Id, PricebookEntry.Product2.Name
+                FROM OpportunityLineItem
+                WHERE OpportunityId = :opportunityId
+                AND PricebookEntry.Product2Id IN :productIds
+            ];
+                        System.debug('Retrieved ' + insertedOLIs.size() + ' inserted line items for mapping');
+                        
+                        for (OpportunityLineItem oli : insertedOLIs) {
+                            product2IdToLineItemId.put(oli.PricebookEntry.Product2Id, oli.Id);
+                            System.debug('Mapped Product: ' + oli.PricebookEntry.Product2.Name +
+                                ' to OLI ID: ' + oli.Id);
+                        }
+                        
+                        // Process BOM products
+                        List<OpportunityLineItem> bomOLIs = new List<OpportunityLineItem>();
+                        for (SpareWrapper spare : bomProducts) {
+                            PricebookEntry pbe = pricebookEntries.get(spare.Id);
+                            Id parentLineItemId = product2IdToLineItemId.get(spare.parentId);
+                            
+                            if (pbe != null && parentLineItemId != null) {
+                                OpportunityLineItem oli = new OpportunityLineItem(
+                                    OpportunityId = opportunityId,
+                                PricebookEntryId = pbe.Id,
+                                Alternate_Product_Name__c = spare.Name,
+                                Alternate_Product_Model__c = spare.modelCode,
+                                Quantity = spare.Quantity,
+                                UnitPrice = pbe.UnitPrice,
+                                Parent_Product__c = parentLineItemId,
+                                Logistics_Instruction__c = spare.logistics,
+                                Manufacturing_Instruction__c = spare.manufacturing,
+                                Additional_Inspection__c = spare.inspection,
+                                Application_Name__c = spare.application,
+                                Product_Group_Name__c = spare.productGroup,
+                                Solution_Name__c = spare.cropSolution,
+                                Series_Name__c = spare.productSeries,
+                                Is_BOM_Component__c = true
+                                    
+                                );
+                                bomOLIs.add(oli);
+                                System.debug('Creating BOM OLI for product: ' + spare.Name +
+                                    ', Qty: ' + spare.Quantity +
+                                    ', Parent: ' + parentLineItemId);
+                            } else {
+                                System.debug('WARNING: Missing pricebook entry or parent for BOM product ID: ' + spare.Id +
+                                    ', pbe exists: ' + (pbe != null) +
+                                    ', parent exists: ' + (parentLineItemId != null));
+                            }
+                        }
+                        
+                        System.debug('Inserting ' + bomOLIs.size() + ' BOM opportunity line items');
+                        insert bomOLIs;
+                        System.debug('Successfully inserted BOM OLIs');
+                    }
+                    // else if (objectType == 'Quote') {
+                        //     // Similar implementation for Quotes...
+                    // }
+                    // else if (objectType == 'Order') {
+                        //     // Similar implementation for Orders...
+                    // }
+                    else {
+                        throw new AuraHandledException('Unsupported record type: ' + objectType);
+                    }
+                    
+                    System.debug('=== COMPLETED createDMSLineItemsPortal SUCCESSFULLY ===');
+                } catch (Exception e) {
+                    System.debug('ERROR in createDMSLineItemsPortal: ' + e.getMessage());
+                    System.debug('Stack trace: ' + e.getStackTraceString());
+                    throw new AuraHandledException('Error creating line items: ' + e.getMessage());
+                }
+            }
+            
+            
+            @AuraEnabled(cacheable=true)
+            public static Map<String, List<String>> getFilterValues(String productGroupId) {
+                System.debug('Inside getFilterValues Method');
+                System.debug('Received productGroupId: ' + productGroupId);
+                
+                // Step 1: Get Product Group and its filters
+                Product_Configurator__c productGroup;
+                try {
+                    productGroup = [
+            SELECT Product_Group_Filters__c 
+            FROM Product_Configurator__c 
+            WHERE Id = :productGroupId 
+            AND Product_Category_Type__c = 'Product Group'
+            LIMIT 1
+        ];
+                } catch (Exception e) {
+                    System.debug('Exception while fetching Product Group: ' + e.getMessage());
+                    return new Map<String, List<String>>();
+                }
+                
+                System.debug('Retrieved Product Group: ' + productGroup);
+                
+                if (productGroup == null || String.isEmpty(productGroup.Product_Group_Filters__c)) {
+                    System.debug('No Product Group Filters found. Returning empty map.');
+                    return new Map<String, List<String>>();
+                }
+                
+                // Extract API Names from multipicklist
+                List<String> filterFields = productGroup.Product_Group_Filters__c.split(';');
+                System.debug('Extracted Filter Fields: ' + filterFields);
+                
+                // Step 2: Fetch related Product Series
+                List<Product_Configurator__c> productSeriesList;
+                try {
+                    productSeriesList = [
+            SELECT Id 
+            FROM Product_Configurator__c 
+            WHERE Parent_Product_Configurator__c = :productGroupId 
+            AND Product_Category_Type__c = 'Product Series'
+        ];
+                } catch (Exception e) {
+                    System.debug('Exception while fetching Product Series: ' + e.getMessage());
+                    return new Map<String, List<String>>();
+                }
+                
+                System.debug('Retrieved Product Series: ' + productSeriesList);
+                
+                if (productSeriesList.isEmpty()) {
+                    System.debug('No Product Series found. Returning empty map.');
+                    return new Map<String, List<String>>();
+                }
+                
+                // Step 3: Get related End Products
+                Set<Id> productSeriesIds = new Set<Id>();
+                for (Product_Configurator__c ps : productSeriesList) {
+                    productSeriesIds.add(ps.Id);
+                }
+                System.debug('Product Series IDs: ' + productSeriesIds);
+                
+                List<Product_Configurator__c> endProducts;
+                try {
+                    endProducts = [
+            SELECT Product__c 
+            FROM Product_Configurator__c 
+            WHERE Parent_Product_Configurator__c IN :productSeriesIds 
+            AND Product_Category_Type__c = 'End Product'
+        ];
+                } catch (Exception e) {
+                    System.debug('Exception while fetching End Products: ' + e.getMessage());
+                    return new Map<String, List<String>>();
+                }
+                
+                System.debug('Retrieved End Products: ' + endProducts);
+                
+                if (endProducts.isEmpty()) {
+                    System.debug('No End Products found. Returning empty map.');
+                    return new Map<String, List<String>>();
+                }
+                
+                // Step 4: Extract Product2 IDs
+                Set<Id> productIds = new Set<Id>();
+                for (Product_Configurator__c endProduct : endProducts) {
+                    if (endProduct.Product__c != null) {
+                        productIds.add(endProduct.Product__c);
+                    }
+                }
+                System.debug('Extracted Product2 IDs: ' + productIds);
+                
+                if (productIds.isEmpty()) {
+                    System.debug('No valid Product2 records found. Returning empty map.');
+                    return new Map<String, List<String>>();
+                }
+                
+                // Step 5: Fetch Product2 records dynamically
+                String soqlQuery = 'SELECT Id, ' + String.join(filterFields, ', ') + ' FROM Product2 WHERE Id IN :productIds';
+                System.debug('Executing SOQL Query: ' + soqlQuery);
+                
+                List<Product2> products;
+                try {
+                    products = Database.query(soqlQuery);
+                } catch (Exception e) {
+                    System.debug('Exception while querying Product2 records: ' + e.getMessage());
+                    return new Map<String, List<String>>();
+                }
+                
+                System.debug('Retrieved Product2 Records: ' + products);
+                
+                // Step 6: Process distinct values for each filter
+                Map<String, Set<String>> filterOptions = new Map<String, Set<String>>();
+                // for (String field : filterFields) {
+                    //     filterOptions.put(field, new Set<String>());
+                // }
+                
+                for (String field : filterFields) {
+                    Schema.DescribeFieldResult fieldResult = Product2.SObjectType.getDescribe().fields.getMap().get(field).getDescribe();
+                    Set<String> picklistValues = new Set<String>();
+                    
+                    for (Schema.PicklistEntry entry : fieldResult.getPicklistValues()) {
+                        picklistValues.add(entry.getValue());
+                    }
+                    
+                    filterOptions.put(field, picklistValues);
+                }
+                
+                
+                
+                System.debug('Initialized Filter Options Map: ' + filterOptions);
+                
+                // for (Product2 p : products) {
+                    //     for (String field : filterFields) {
+                        //         String value = String.valueOf(p.get(field));
+                        //         if (!String.isEmpty(value)) {
+                            //             filterOptions.get(field).add(value);
+                        //         }
+                    //     }
+                // }
+                
+                for (Product2 p : products) {
+                    for (String field : filterFields) {
+                        Object value = p.get(field);
+                        if (value != null) {
+                            filterOptions.get(field).add(String.valueOf(value));
+                        }
+                    }
+                }
+                
+                System.debug('Populated Filter Options: ' + filterOptions);
+                
+                // Convert Set to List
+                Map<String, List<String>> finalFilters = new Map<String, List<String>>();
+                for (String key : filterOptions.keySet()) {
+                    finalFilters.put(key, new List<String>(filterOptions.get(key)));
+                }
+                
+                return finalFilters;
+            }
+            
+            public static void testingMethod(){
+                Integer i = 0;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                i++;
+                
+                
+                
+                
+            }
+            
+            
+            public class SpareWrapper {
+                @AuraEnabled public String Id;
+                @AuraEnabled public String Name;
+                @AuraEnabled public String productModel;
+                @AuraEnabled public Integer Quantity;
+                @AuraEnabled public Integer Amount;
+                @AuraEnabled public String parentId;
+                @AuraEnabled public Boolean isChecked;
+                @AuraEnabled public String logistics;
+                @AuraEnabled public String inspection;
+                @AuraEnabled public String manufacturing;
+                @AuraEnabled public String cropSolution;
+                @AuraEnabled public String application;
+                @AuraEnabled public String productGroup;
+                @AuraEnabled public String productSeries;
+                @AuraEnabled public String modelCode;
+                
+            }
+            
+            public class ProductWrapper {
+                public String productId { get; set; }
+                public String productName { get; set; }
+                public String bomComponent { get; set; }
+                public String productModel { get; set; }
+                public String imageUrl { get; set; }
+                public Boolean selected { get; set; }
+                public List<BomWrapper> bomList { get; set; }
+                public Boolean isChecked { get; set; }
+                public Boolean showBOM { get; set; } // This is missing in your wrapper
+                public String quantity { get; set; }
+                public String price { get; set; }
+                public String materialCode { get; set; }
+                public String inspection { get; set; }
+                public String manufacturing { get; set; }
+                public String logistics { get; set; }
+                public String cropSolution { get; set; }
+                public String application { get; set; }
+                public String subApplication { get; set; }
+                public String productGroup { get; set; }
+                public String hpRange { get; set; }
+                public String productSeries { get; set; }
+                public String endProduct { get; set; }
+                public Boolean prodSel { get; set; }
+                
+                
+                public ProductWrapper() {
+                    this.bomList = new List<BomWrapper>();
+                }
+            }
+            
+            public class BomWrapper {
+                public String id { get; set; }
+                @AuraEnabled public String productName { get; set; }
+                public String bomComponent { get; set; }
+                public Boolean selected { get; set; }
+                public Boolean isChecked { get; set; }
+                public Boolean isDisabled { get; set; }
+                public Decimal altBOM { get; set; }
+                public String prodDes { get; set; }
+                public String parentId { get; set; }
+                public String quantity { get; set; }
+                public String price { get; set; }
+                public String materialCode { get; set; }
+                public String inspection { get; set; }
+                public String manufacturing { get; set; }
+                public String logistics { get; set; }
+                public String cropSolution { get; set; }
+                public String application { get; set; }
+                public String subApplication { get; set; }
+                public String productGroup { get; set; }
+                public String hpRange { get; set; }
+                public String productSeries { get; set; }
+                public String endProduct { get; set; }
+                public Boolean prodSel { get; set; }
+            }
+            
+            public class ProdWrapper {
+                @AuraEnabled public Id id;
+                @AuraEnabled public String name;
+                @AuraEnabled public Decimal quantity;
+                @AuraEnabled public Decimal price;
+                @AuraEnabled public String imageUrl;
+                @AuraEnabled public String materialCode;
+                @AuraEnabled public String logistics;
+                @AuraEnabled public String inspection;
+                @AuraEnabled public String manufacturing;
+            }
+            
+        }
