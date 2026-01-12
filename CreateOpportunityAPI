@@ -1,0 +1,577 @@
+@RestResource(urlMapping='/createOpportunityAPI/*')
+global with sharing class CreateOpportunityAPI {
+
+    /* ==================== WRAPPERS ==================== */
+
+    global class ProductWrapper {
+        public String productCode;
+        public Decimal quantity;
+    }
+
+    global class OppRequest {
+        public String customerNumber;
+        public List<ProductWrapper> products;
+    }
+
+    global class LineItemResponse {
+        public String productCode;
+        public String pricebookEntryId;
+        public Decimal unitPrice;
+        public Decimal quantity;
+    }
+
+    global class OppResponse {
+        public Boolean success;
+        public String message;
+        public String opportunityId;
+        public List<LineItemResponse> lineItems = new List<LineItemResponse>();
+        public List<String> skippedProducts = new List<String>();
+    }
+
+    /* ==================== MAIN API ==================== */
+
+    @HttpPost
+    global static OppResponse createOpp() {
+
+        OppResponse res = new OppResponse();
+
+        try {
+
+            /* -------- Deserialize -------- */
+            OppRequest input = (OppRequest) JSON.deserialize(
+                RestContext.request.requestBody.toString(),
+                OppRequest.class
+            );
+
+            if (input.products == null || input.products.isEmpty()) {
+                res.success = false;
+                res.message = 'No products provided.';
+                return res;
+            }
+
+            /* -------- Account -------- */
+            Account acc = [
+                SELECT Id, CurrencyIsoCode
+                FROM Account
+                WHERE Customer_Number__c = :input.customerNumber
+                LIMIT 1
+            ];
+
+            /* -------- Product Codes -------- */
+            Set<String> productCodes = new Set<String>();
+            for (ProductWrapper pw : input.products) {
+                productCodes.add(pw.productCode);
+            }
+
+            /* -------- Fetch PBEs (currency strict) -------- */
+            List<PricebookEntry> allPBEs = [
+                SELECT Id, Product2.ProductCode, UnitPrice,
+                       Pricebook2Id, Pricebook2.IsActive,
+                       Pricebook2.IsStandard,
+                       CurrencyIsoCode
+                FROM PricebookEntry
+                WHERE Product2.ProductCode IN :productCodes
+                AND IsActive = true
+                AND Pricebook2.IsActive = true
+                AND CurrencyIsoCode = :acc.CurrencyIsoCode
+            ];
+
+            if (allPBEs.isEmpty()) {
+                res.success = false;
+                res.message = 'No PricebookEntry found for account currency: ' + acc.CurrencyIsoCode;
+                return res;
+            }
+
+            /* -------- Group PBEs by Pricebook -------- */
+            Map<Id, Map<String, PricebookEntry>> customPB = new Map<Id, Map<String, PricebookEntry>>();
+            Map<Id, Map<String, PricebookEntry>> standardPB = new Map<Id, Map<String, PricebookEntry>>();
+
+            for (PricebookEntry p : allPBEs) {
+                if (!p.Pricebook2.IsStandard) {
+                    if (!customPB.containsKey(p.Pricebook2Id)) {
+                        customPB.put(p.Pricebook2Id, new Map<String, PricebookEntry>());
+                    }
+                    customPB.get(p.Pricebook2Id).put(p.Product2.ProductCode, p);
+                } else {
+                    if (!standardPB.containsKey(p.Pricebook2Id)) {
+                        standardPB.put(p.Pricebook2Id, new Map<String, PricebookEntry>());
+                    }
+                    standardPB.get(p.Pricebook2Id).put(p.Product2.ProductCode, p);
+                }
+            }
+
+            /* -------- Select ONE pricebook (Custom → Standard) -------- */
+            Id selectedPBId;
+            Map<String, PricebookEntry> selectedPBEMap;
+
+            // 1️⃣ Custom pricebook priority
+            for (Id pbId : customPB.keySet()) {
+                if (customPB.get(pbId).keySet().containsAll(productCodes)) {
+                    selectedPBId = pbId;
+                    selectedPBEMap = customPB.get(pbId);
+                    break;
+                }
+            }
+
+            // 2️⃣ Standard fallback
+            if (selectedPBId == null) {
+                for (Id pbId : standardPB.keySet()) {
+                    if (standardPB.get(pbId).keySet().containsAll(productCodes)) {
+                        selectedPBId = pbId;
+                        selectedPBEMap = standardPB.get(pbId);
+                        break;
+                    }
+                }
+            }
+
+            if (selectedPBId == null) {
+                res.success = false;
+                res.message =
+                    'Products are not available in a single pricebook for currency '
+                    + acc.CurrencyIsoCode +
+                    '. Custom checked first, then Standard.';
+                return res;
+            }
+
+            /* -------- Create Opportunity -------- */
+            Opportunity opp = new Opportunity(
+                Name = 'eCatalog - ' + input.customerNumber + ' - ' + Date.today().format(),
+                StageName = 'Prospecting',
+                CloseDate = Date.today().addDays(30),
+                AccountId = acc.Id,
+                Pricebook2Id = selectedPBId,
+                CurrencyIsoCode = acc.CurrencyIsoCode
+            );
+            insert opp;
+
+            /* -------- Create Line Items -------- */
+            List<OpportunityLineItem> oliList = new List<OpportunityLineItem>();
+
+            for (ProductWrapper pw : input.products) {
+
+                PricebookEntry pbe = selectedPBEMap.get(pw.productCode);
+
+                Decimal finalUnitPrice = getFinalUnitPrice(
+                    pw.productCode,
+                    acc.CurrencyIsoCode,
+                    pbe.UnitPrice
+                );
+
+                OpportunityLineItem oli = new OpportunityLineItem(
+                    OpportunityId = opp.Id,
+                    PricebookEntryId = pbe.Id,
+                    Quantity = pw.quantity,
+                    UnitPrice = finalUnitPrice
+                );
+                oliList.add(oli);
+
+                LineItemResponse lr = new LineItemResponse();
+                lr.productCode = pw.productCode;
+                lr.pricebookEntryId = pbe.Id;
+                lr.unitPrice = finalUnitPrice;
+                lr.quantity = pw.quantity;
+                res.lineItems.add(lr);
+            }
+
+            insert oliList;
+
+            res.success = true;
+            res.opportunityId = opp.Id;
+            res.message = 'Opportunity and line items created successfully.';
+
+        } catch (Exception ex) {
+            res.success = false;
+            res.message = 'Error: ' + ex.getMessage();
+        }
+
+        return res;
+    }
+
+    /* ==================== CUSTOM PRICE LOGIC ==================== */
+
+    private static Decimal getFinalUnitPrice(
+        String productCode,
+        String currencyIsoCode,
+        Decimal fallbackPrice
+    ) {
+        List<Pricebook_Lines__c> customPrices = [
+            SELECT UNIT_COST__c
+            FROM Pricebook_Lines__c
+            WHERE ITEM_CODE__c = :productCode
+            AND CurrencyIsoCode = :currencyIsoCode
+            AND STATUS__c = true
+            AND START_DATE_ACTIVE__c <= TODAY
+            AND (END_DATE_ACTIVE__c = NULL OR END_DATE_ACTIVE__c >= TODAY)
+            ORDER BY START_DATE_ACTIVE__c DESC
+            LIMIT 1
+        ];
+
+        if (!customPrices.isEmpty()) {
+            return customPrices[0].UNIT_COST__c;
+        }
+
+        return fallbackPrice;
+    }
+}
+
+
+
+
+/*  Recent old code
+@RestResource(urlMapping='/createOpportunityAPI/*')
+global with sharing class CreateOpportunityAPI {
+
+    global class ProductWrapper {
+        public String productCode;
+        public Decimal quantity;
+    }
+
+    global class OppRequest {
+        public String customerNumber;
+        public List<ProductWrapper> products;
+    }
+
+    global class LineItemResponse {
+        public String productCode;
+        public String pricebookEntryId;
+        public Decimal unitPrice;
+        public Decimal quantity;
+    }
+
+    global class OppResponse {
+        public Boolean success;
+        public String message;
+        public String opportunityId;
+        public List<LineItemResponse> lineItems = new List<LineItemResponse>();
+        public List<String> skippedProducts = new List<String>();
+    }
+
+    @HttpPost
+    global static OppResponse createOpp() {
+        OppResponse res = new OppResponse();
+
+        try {
+            OppRequest input = (OppRequest) JSON.deserialize(RestContext.request.requestBody.toString(), OppRequest.class);
+
+            if (input.products == null || input.products.isEmpty()) {
+                res.success = false;
+                res.message = 'No products provided.';
+                return res;
+            }
+
+            // Get Account
+            Account acc = [
+                SELECT Id FROM Account
+                WHERE Customer_Number__c = :input.customerNumber
+                LIMIT 1
+            ];
+
+            // Collect Product Codes
+            List<String> productCodes = new List<String>();
+            for (ProductWrapper pw : input.products)
+                productCodes.add(pw.productCode);
+
+            // Fetch ALL PBEs for these products
+            List<PricebookEntry> allPBEs = [
+                SELECT Id, Product2.ProductCode, UnitPrice, Pricebook2Id,
+                       Pricebook2.IsStandard, Pricebook2.IsActive, CurrencyIsoCode
+                FROM PricebookEntry
+                WHERE Product2.ProductCode IN :productCodes
+                AND IsActive = true
+            ];
+
+            if (allPBEs.isEmpty()) {
+                res.success = false;
+                res.message = 'No PBEs found.';
+                return res;
+            }
+
+            // 🔹 Identify CUSTOM pricebook PBEs
+            List<PricebookEntry> customPBEs = new List<PricebookEntry>();
+            for (PricebookEntry p : allPBEs) {
+                if (!p.Pricebook2.IsStandard && p.Pricebook2.IsActive) {
+                    customPBEs.add(p);
+                }
+            }
+
+            // 🔹 If custom PBEs exist → use custom pricebook
+            Id selectedPB;
+            List<PricebookEntry> finalPBEs;
+
+            if (!customPBEs.isEmpty()) {
+                selectedPB = customPBEs[0].Pricebook2Id;
+
+                finalPBEs = new List<PricebookEntry>();
+                for (PricebookEntry p : customPBEs) {
+                    if (p.Pricebook2Id == selectedPB)
+                        finalPBEs.add(p);
+                }
+            } else {
+                // 🔹 Else use active Standard pricebook
+                Pricebook2 stdPB = [
+                    SELECT Id
+                    FROM Pricebook2
+                    WHERE IsStandard = true AND IsActive = true
+                    LIMIT 1
+                ];
+
+                selectedPB = stdPB.Id;
+
+                finalPBEs = new List<PricebookEntry>();
+                for (PricebookEntry p : allPBEs) {
+                    if (p.Pricebook2Id == selectedPB)
+                        finalPBEs.add(p);
+                }
+            }
+
+            // Map PBEs by ProductCode
+            Map<String, PricebookEntry> pbeMap = new Map<String, PricebookEntry>();
+            for (PricebookEntry p : finalPBEs)
+                pbeMap.put(p.Product2.ProductCode, p);
+
+            // Create Opportunity
+            Opportunity opp = new Opportunity(
+                Name = 'eCatalog - ' + input.customerNumber + ' - ' + Date.today().format(),
+                StageName = 'Prospecting',
+                CloseDate = Date.today().addDays(30),
+                AccountId = acc.Id,
+                Pricebook2Id = selectedPB,
+                CurrencyIsoCode = allPBEs[0].CurrencyIsoCode
+            );
+            insert opp;
+
+            // Create Opportunity Line Items
+            List<OpportunityLineItem> oliList = new List<OpportunityLineItem>();
+
+            for (ProductWrapper pw : input.products) {
+                if (!pbeMap.containsKey(pw.productCode)) {
+                    res.skippedProducts.add(pw.productCode);
+                    continue;
+                }
+
+                PricebookEntry pbe = pbeMap.get(pw.productCode);
+
+                OpportunityLineItem oli = new OpportunityLineItem(
+                    OpportunityId = opp.Id,
+                    PricebookEntryId = pbe.Id,
+                    UnitPrice = pbe.UnitPrice,
+                    Quantity = pw.quantity
+                );
+                oliList.add(oli);
+
+                LineItemResponse lr = new LineItemResponse();
+                lr.productCode = pw.productCode;
+                lr.pricebookEntryId = pbe.Id;
+                lr.unitPrice = pbe.UnitPrice;
+                lr.quantity = pw.quantity;
+                res.lineItems.add(lr);
+            }
+
+            if (!oliList.isEmpty())
+                insert oliList;
+
+            res.success = true;
+            res.opportunityId = opp.Id;
+            res.message = 'Opportunity + Line Items created successfully';
+
+        } catch (Exception ex) {
+            res.success = false;
+            res.message = 'Error: ' + ex.getMessage();
+        }
+
+        return res;
+    }
+}
+*/
+
+/*****************OLD CODE**********************/
+
+/*
+@RestResource(urlMapping='/createOpportunityAPI/*')
+global with sharing class CreateOpportunityAPI {
+
+    // =========================
+    // Request Wrapper Classes
+    // =========================
+    global class ProductWrapper {
+        public String productCode;
+        public Decimal quantity;
+    }
+
+    global class OppRequest {
+        public String customerNumber;
+        public String currencyCode;
+        public List<ProductWrapper> products;
+    }
+
+    // =========================
+    // Response Wrapper Classes
+    // =========================
+    global class LineItemResponse {
+        public String productCode;
+        public String pricebookEntryId;
+        public Decimal unitPrice;
+        public Decimal quantity;
+    }
+
+    global class OppResponse {
+        public Boolean success;
+        public String message;
+        public String opportunityId;
+        public List<LineItemResponse> lineItems;
+        public List<String> skippedProducts;
+
+        public OppResponse() {
+            lineItems = new List<LineItemResponse>();
+            skippedProducts = new List<String>();
+        }
+    }
+
+    // =========================
+    // Main REST POST Method
+    // =========================
+    @HttpPost
+    global static OppResponse createOpp() {
+        RestRequest req = RestContext.request;
+        OppResponse res = new OppResponse();
+
+        try {
+            OppRequest input = (OppRequest)JSON.deserialize(req.requestBody.toString(), OppRequest.class);
+
+            if(input.products == null || input.products.isEmpty()) {
+                res.success = false;
+                res.message = 'No products provided in the request';
+                return res;
+            }
+
+            // 1️⃣ Find Account by Customer Number
+            Account acc = [
+                SELECT Id, Name 
+                FROM Account 
+                WHERE Customer_Number__c = :input.customerNumber
+                LIMIT 1
+            ];
+
+            // 2️⃣ Fetch Standard Pricebook for Opportunity
+            // String currencyLike = '%' + input.currencyCode + '%';
+            String currencyLike = 
+            (input.currencyCode != null && 
+            (input.currencyCode.trim().toUpperCase() == 'USD' || input.currencyCode.trim().toUpperCase() == 'EUR')) 
+            ? '%' + input.currencyCode.trim().toUpperCase() + '%' 
+            : '%Standard%';
+
+            Pricebook2 pb = [
+                SELECT Id, Name 
+                FROM Pricebook2 
+                WHERE IsActive = true 
+                AND Name LIKE :currencyLike
+                LIMIT 1
+            ];
+
+            // 3️⃣ Fetch PricebookEntries for requested products in this Pricebook and matching currency
+            List<String> productCodes = new List<String>();
+            for(ProductWrapper pw : input.products) productCodes.add(pw.productCode);
+
+            
+ 
+            List<PricebookEntry> pbeList = [
+                SELECT Id, Product2.ProductCode, UnitPrice, Pricebook2Id, Name
+                FROM PricebookEntry
+                WHERE Pricebook2Id = :pb.Id
+                AND Product2.ProductCode IN :productCodes
+                AND Pricebook2.Name LIKE :currencyLike
+                AND IsActive = true
+            ];
+
+            
+            
+            System.debug('Opportunity Pricebook2Id: ' + pb.Id);
+            System.debug('currencyLike: ' + currencyLike);
+            System.debug('productCodes: ' + productCodes);
+            System.debug('PBE List: ' + pbeList);
+
+            for (PricebookEntry pbe : pbeList) {
+                System.debug('PricebookEntry ProductCode: ' + pbe.Product2.ProductCode + ', Pricebook2Id: ' + pbe.Pricebook2Id);
+            }
+
+
+            if(pbeList.isEmpty()) {
+                res.success = false;
+                res.message = 'No PricebookEntries found for the given product codes in the Standard Pricebook with requested currency';
+                return res;
+            }
+
+            // Map ProductCode -> PricebookEntry for this Pricebook
+            Map<String, PricebookEntry> pbeMap = new Map<String, PricebookEntry>();
+            for(PricebookEntry pbe : pbeList) {
+                pbeMap.put(pbe.Product2.ProductCode, pbe);
+            }
+
+            // 4️⃣ Create Opportunity
+            String oppName = 'eCatalog - ' + input.customerNumber + ' - ' + System.today().format();
+            Opportunity opp = new Opportunity(
+                Name = oppName,
+                StageName = 'Prospecting',
+                CloseDate = System.today().addDays(30),
+                AccountId = acc.Id,
+                Pricebook2Id = pb.Id,
+                CurrencyIsoCode = input.currencyCode
+            );
+            insert opp;
+
+            // 5️⃣ Create Opportunity Line Items
+            List<OpportunityLineItem> oliList = new List<OpportunityLineItem>();
+            for(ProductWrapper pw : input.products) {
+                if(!pbeMap.containsKey(pw.productCode)) {
+                    res.skippedProducts.add(pw.productCode);
+                    continue;
+                }
+
+                PricebookEntry pbe = pbeMap.get(pw.productCode);
+                Decimal qty = (pw.quantity != null ? pw.quantity : 1);
+
+                OpportunityLineItem oli = new OpportunityLineItem(
+                    OpportunityId = opp.Id,
+                    PricebookEntryId = pbe.Id,
+                    Quantity = qty,
+                    UnitPrice = pbe.UnitPrice
+                );
+                oliList.add(oli);
+
+                // Add to response
+                LineItemResponse liRes = new LineItemResponse();
+                liRes.productCode = pw.productCode;
+                liRes.pricebookEntryId = pbe.Id;
+                liRes.unitPrice = pbe.UnitPrice;
+                liRes.quantity = qty;
+                res.lineItems.add(liRes);
+            }
+
+            if(!oliList.isEmpty()) insert oliList;
+
+            // 6️⃣ Success Response
+            res.success = true;
+            res.message = 'Opportunity created successfully';
+            res.opportunityId = opp.Id;
+
+            if(!res.skippedProducts.isEmpty()) {
+                res.message += '. Some products were skipped due to missing PricebookEntries or currency mismatch.';
+            }
+
+        } catch(QueryException qe) {
+            res.success = false;
+            res.message = 'No Account or PricebookEntry found for the input data';
+        } catch(DmlException de) {
+            res.success = false;
+            res.message = 'Error inserting Opportunity or Line Items: ' + de.getMessage();
+        } catch(Exception ex) {
+            res.success = false;
+            res.message = 'Unexpected error: ' + ex.getMessage();
+        }
+
+        return res;
+    }
+}
+
+*/
+/********************************END CODE********************************/
