@@ -1,0 +1,13 @@
+trigger QuoteLineItemTrigger on QuoteLineItem (after insert, after update) {
+
+    // 1️⃣ Handle Quote Approval Flag
+    QuoteLineItemTriggerHandler.handleQuoteApprovalFlag(Trigger.new);
+
+    // 2️⃣ Handle NDP Price Flag (existing logic, optional)
+    //QuoteLineItemTriggerHandler.handleNDPPriceFlag(Trigger.new);
+
+    // 3️⃣ Handle From_NDP__c and All_From_RC__c together
+    QuoteLineItemTriggerHandler.handleFromNDPAndAllFromRC(Trigger.new);
+    
+    //QuoteAlignmentService.recalculateAlignment(Trigger.new, Trigger.oldMap);
+}
