@@ -1,0 +1,31 @@
+public class OpportunityTriggerHandler extends TriggerHandler {
+    private List<Opportunity> newRecords;
+    private List<Opportunity> oldRecords;
+    private Map<Id, Opportunity> newRecordsMap;
+    private Map<Id, Opportunity> oldRecordsMap;
+
+    public OpportunityTriggerHandler() {
+        super('OpportunityTriggerHandler');
+        this.newRecords = (List<Opportunity>) Trigger.new;
+        this.oldRecords = (List<Opportunity>) Trigger.old;
+        this.newRecordsMap = (Map<Id, Opportunity>) Trigger.newMap;
+        this.oldRecordsMap = (Map<Id, Opportunity>) Trigger.oldMap;
+    }
+
+    public override void afterInsert() {
+        assignRFQOwner(newRecords);
+    }
+
+    private static void assignRFQOwner(List<Opportunity> oppList) {
+        if (oppList == null || oppList.isEmpty()) return;
+
+        List<Id> oppIds = new List<Id>();
+        for (Opportunity opp : oppList) {
+            oppIds.add(opp.Id);
+        }
+
+        if (!oppIds.isEmpty()) {
+           RFQAssignmentAsyncServices.assignRFQOwnerAsync(oppIds);
+        }
+    }
+}
