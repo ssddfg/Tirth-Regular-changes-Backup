@@ -1,0 +1,3 @@
+trigger QuoteTrigger on Quote (before Insert, before Update, before Delete, after Insert, after Update, after Delete, after Undelete) {
+    new QuoteTriggerHandler().run();
+}
