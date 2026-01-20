@@ -1,0 +1,49 @@
+import { LightningElement, track } from 'lwc';
+import getEcatalogueUrl from '@salesforce/apex/EcatalogueConfigController.getEcatalogueUrl';
+
+export default class EcatalogueComponent extends LightningElement {
+    @track url;
+    @track isInternalUser = false;
+    @track isLoading = true;
+    @track errorMessage;
+
+    connectedCallback() {
+        this.loadUrl();
+    }
+
+    loadUrl() {
+        this.isLoading = true;
+        this.errorMessage = null;
+
+        getEcatalogueUrl()
+            .then(result => {
+                if (result) {
+                    this.url = result;
+
+                    // 🔹 Check if internal user (no token)
+                    if (!result.includes('token=')) {
+                        this.isInternalUser = true;
+                    } else {
+                        this.isInternalUser = false;
+                    }
+                } else {
+                    this.errorMessage =
+                        'eCatalogue URL not available. Please contact administrator.';
+                }
+            })
+            .catch(error => {
+                console.error('Apex error:', error);
+                this.errorMessage =
+                    error?.body?.message || 'Error while fetching eCatalogue URL.';
+            })
+            .finally(() => {
+                this.isLoading = false;
+            });
+    }
+
+    handleOpenEcatalogue() {
+        if (this.url) {
+            window.open(this.url, '_blank');
+        }
+    }
+}
