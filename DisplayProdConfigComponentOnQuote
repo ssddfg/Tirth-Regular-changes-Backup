@@ -1,0 +1,526 @@
+import { api, LightningElement, track, wire } from 'lwc';
+import fetchDetails from '@salesforce/apex/DisplayProdConfigController.fetchDetails';
+//import fetchDetails1 from '@salesforce/apex/DisplayProdConfigController.updateQuoteField';
+//import updateQuoteField from '@salesforce/apex/DisplayProdConfigController.updateQuoteField';
+import getPricebooks from '@salesforce/apex/DisplayProdConfigController.getPricebooks';
+import { ShowToastEvent } from 'lightning/platformShowToastEvent';
+import updatePricebook from '@salesforce/apex/DisplayProdConfigController.updatePricebook';
+import updateOpportunityProduct from '@salesforce/apex/ProductConfig.updateOpportunityProduct';
+import getPricebookName from '@salesforce/apex/DisplayProdConfigController.getPricebookName';
+import DesktopView from "./displayProdConfigComponentOnQuote.html";
+//import MobileView from "./displayProdConfigComponentMobiView.html";
+import FORM_FACTOR from "@salesforce/client/formFactor";
+import { NavigationMixin } from 'lightning/navigation';
+import { CurrentPageReference } from 'lightning/navigation';
+import { refreshApex } from '@salesforce/apex';
+//import { getRecordNotifyChange } from 'lightning/uiRecordApi';
+
+ 
+
+export default class DisplayProdConfigComponentOnQuote extends NavigationMixin(LightningElement) {
+    @track groupedProducts = [];
+    @track addProductModal = false;
+    @track editProductModal = false;
+    @track openPricebookModal = false;
+    @track componentTitle = '';
+    @api recordId;
+    @track noProducts = false;
+    @track showSpinner = false;
+    @track modifiedProducts = {}; // Stores received changes
+    @track  newBOMLineItems ={}; // Stores received changes
+    
+    render() {
+        if (FORM_FACTOR === 'Large') {
+            return DesktopView;
+        }
+        return MobileView;
+    }
+@wire(CurrentPageReference)
+getStateParameters(currentPageReference) {
+    if (currentPageReference) {
+        this.recordId = currentPageReference.state?.recordId || currentPageReference.attributes?.recordId;
+        console.log('Record Id from URL:', this.recordId);
+    }
+}
+
+    @track products = [
+        // {
+        //     Id: 'abc',
+        //     ProductName: 'Product 1',
+        //     CropSolution: 'Crop Solution 1',
+        //     Application: 'Crop-cutter',
+        //     SoilType: 'Dry Land',
+        //     Quantity: '4',
+        //     Price: '300000',
+        //     ProductGroup: 'Rotary tiller',
+        //     ProductType: 'Core Product',
+        //     logInstruct:'If lost, return to sender. If found, pretend you didn’t see this.....hehe 😁',
+        //     manfInstruct:'Batteries not included… because we forgot..... LOL 🫠🫠',
+        //     addInstruct:'Warning: Opening this may cause extreme joy or mild disappointment 😼',
+        //     altBOMList: [
+        //         {
+        //             Id: '123',
+        //             ProductName: 'Steel Blade',
+        //             Quantity: '1',
+        //             ProductType: 'Alt-BOM'
+        //         },
+        //         {
+        //             Id: '234',
+        //             ProductName: 'Metal Frame',
+        //             Quantity: '1',
+        //             ProductType: 'Alt-BOM'
+        //         },
+        //         {
+        //             Id: '2345',
+        //             ProductName: 'MRF tyres',
+        //             Quantity: '6',
+        //             ProductType: 'Alt-BOM'
+        //         }
+        //     ]
+        // }, {
+        //     Id: 'abc2',
+        //     ProductName: 'Product 1.1',
+        //     CropSolution: 'Crop Solution 1',
+        //     Application: 'Crop-cutter',
+        //     SoilType: 'Dry Land',
+        //     ProductGroup: 'Rotary tiller',
+        //     Quantity: '1',
+        //     Price: '100000',
+        //     ProductType: 'Core Product',
+        //     altBOMList: [
+        //         {
+        //             Id: '123',
+        //             ProductName: 'Steel Blade - variant',
+        //             Quantity: '2',
+        //             Price: '900000',
+        //             ProductType: 'Alt-BOM',
+        //             logInstruct:'This package enjoys long walks on the conveyor belt',
+        //             manfInstruct:'If this package is upside down, something has gone terribly wrong.',
+        //             addInstruct:'Please don’t use this box as a seat. We’re looking at you, warehouse guy!',
+        //         },
+        //         {
+        //             Id: '234',
+        //             ProductName: 'Copper Blade - variant',
+        //             Quantity: '1',
+        //             ProductType: 'Alt-BOM'
+        //         }
+        //     ]
+        // }, {
+        //     Id: 'abcd',
+        //     ProductName: 'Product 1',
+        //     CropSolution: 'Crop Solution 1',
+        //     Application: 'Crop-cutter',
+        //     SoilType: 'Wet Land',
+        //     Quantity: '4',
+        //     Price: '300000',
+        //     ProductGroup: 'Rotary tiller',
+        //     ProductType: 'Core Product',
+        //     altBOMList: [
+        //         {
+        //             Id: '123',
+        //             ProductName: 'Steel Blade - variant',
+        //             Quantity: '2',
+        //             ProductType: 'Alt-BOM'
+        //         },
+        //         {
+        //             Id: '234',
+        //             ProductName: 'Copper Blade - variant',
+        //             Quantity: '1',
+        //             ProductType: 'Alt-BOM'
+        //         }
+        //     ]
+        // },
+        // {
+        //     Id: 'def',
+        //     ProductName: 'Product 2',
+        //     CropSolution: 'Crop Solution 2',
+        //     ProductGroup: 'Baller',
+        //     Application: 'Crop-cutter',
+        //     SoilType: 'Wet Land',
+        //     Quantity: '5',
+        //     Price: '100000',
+        //     ProductType: 'Core Product',
+        // },
+        // {
+        //     Id: 'ghi',
+        //     ProductName: 'Product 3',
+        //     Quantity: '1',
+        //     Price: '200000',
+        //     ProductGroup: 'Spare Product',
+        //     ProductType: 'Spare Product'
+        // }
+    ];
+
+    connectedCallback() {
+        this.groupProducts();
+        this.handleFetchDetails();
+    }
+
+    //Sanresh Code
+
+
+    handleFetchDetails(){
+        console.log('Record Id :: '  + this.recordId);
+        fetchDetails({ recordId: this.recordId })
+            .then(data => {
+                console.log('Data from Controllers fetchDetails ::>> ' + JSON.stringify(data));
+                this.products = data;
+                this.groupProducts();
+                // this.products = null;
+                if(this.products.length == 0){
+                    this.noProducts = true;
+                }
+            })
+            .catch(error => {
+                console.log('Error from Controllers fetchDetails ::>> ' + error);
+            })
+            .finally(() => {
+                this.showSpinner = false; // Hide loading state
+            });
+    }
+
+//NEW CODE
+
+
+/*
+handleFetchDetails() {
+    console.log('Record Id :: ' + this.recordId);
+
+    fetchDetails({ recordId: this.recordId })
+        .then(data => {
+            console.log('Data from Controllers fetchDetails ::>> ' + JSON.stringify(data));
+
+            this.products = Array.isArray(data) ? data : [];
+
+            if (this.products.length > 0) {
+
+                const allFromRC = this.products.every(
+                    p => p?.FromRateContract === true
+                );
+
+                console.log('All Products From RC: ' + allFromRC);
+
+                updateQuoteField({
+                    quoteId: this.recordId,
+                    allFromRC: allFromRC
+                })
+                .then(() => {
+                    console.log('Quote updated successfully');
+
+                    // 🔥 Auto Refresh Quote Header / Fields
+                    getRecordNotifyChange([{ recordId: this.recordId }]);
+
+                    // 🔥 Re-fetch product list
+                    return fetchDetails({ recordId: this.recordId });
+                })
+                .then(refreshed => {
+                    this.products = Array.isArray(refreshed) ? refreshed : [];
+                    this.groupProducts();
+                })
+                .catch(error => {
+                    console.error('Error updating Quote: ', error);
+                });
+            }
+
+            this.groupProducts();
+
+            if (this.products.length === 0) {
+                this.noProducts = true;
+            }
+        })
+        .catch(error => {
+            console.log('Error from Controllers fetchDetails ::>> ' + error);
+        })
+        .finally(() => {
+            this.showSpinner = false;
+        });
+}
+*/
+
+
+
+
+
+
+    handleTitle(){
+        this.componentTitle = `Products (${this.products.length})`;
+    }
+
+    handleNavigate(event) {
+        const recordId = event.currentTarget.dataset.id;
+        console.log('recordToNavigate::',recordId)
+        this[NavigationMixin.Navigate]({
+            type: 'standard__recordPage',
+            attributes: {
+                recordId: recordId,
+                objectApiName: 'OpportunityLineItem',
+                actionName: 'view'
+            }
+        });
+    }
+
+
+    // groupProducts() {
+    //     let grouped = {};
+
+    //     this.products.forEach(product => {
+    //         let groupKey = `${product.ProductGroup}-${product.CropSolution || ''}-${product.Application || ''}-${product.SoilType || ''}-${product.productSeries || ''}`;
+
+    //         if (!grouped[groupKey]) {
+    //             grouped[groupKey] = {
+    //                 productGroup: product.ProductGroup,
+    //                 cropSolution: product.CropSolution || '',
+    //                 application: product.Application || '',
+    //                 soilType: product.SoilType || '',
+    //                 productSeries: product.productSeries || '',
+    //                 products: []
+    //             };
+    //         }
+
+    //         grouped[groupKey].products.push(product);
+    //     });
+
+    //     this.groupedProducts = Object.values(grouped);
+    //     console.log('Grouped Products:', JSON.stringify(this.groupedProducts, null, 2));
+    //     this.handleTitle();
+
+    // }
+
+    groupProducts() {
+    if (!this.products || this.products.length === 0) {
+        this.groupedProducts = [];
+        this.handleTitle();
+        return;
+    }
+
+    let grouped = {};
+    this.showOnlyEdit = this.products[0].ShowOnlyEdit,
+
+
+    this.products.forEach(product => {
+        let groupKey = `${product.ProductGroup}-${product.CropSolution || ''}-${product.Application || ''}-${product.SoilType || ''}-${product.productSeries || ''}`;
+
+        if (!grouped[groupKey]) {
+            grouped[groupKey] = {
+                productGroup: product.ProductGroup,
+                cropSolution: product.CropSolution || '',
+                application: product.Application || '',
+                soilType: product.SoilType || '',
+                productSeries: product.productSeries || '',
+                products: []
+            };
+        }
+        
+        if (product.altBOMList && product.altBOMList.length > 0) {
+            const bomGroupsMap = new Map();
+            product.altBOMList.forEach(altItem => {
+                const bomGroupKey = altItem.AlternativeBOM;
+                if (bomGroupKey && !bomGroupsMap.has(bomGroupKey)) {
+                    bomGroupsMap.set(bomGroupKey, altItem.Description || '');
+                }
+            });
+
+            product.bomGroupSummaries = [];
+            bomGroupsMap.forEach((description, groupKey) => {
+                product.bomGroupSummaries.push({
+                    groupKey: groupKey,
+                    description: description,
+                    displayLabel: `Group: ${groupKey}`
+                });
+            });
+        }
+        
+        grouped[groupKey].products.push(product);
+    });
+
+    this.groupedProducts = Object.values(grouped);
+    this.handleTitle();
+}
+
+    openModal(event) {
+        const buttonLabel = event.target.label;
+        console.log('OUTPUT : ',buttonLabel);
+        if (buttonLabel === 'Add Products') {
+            this.addProductModal = true;
+            this.editProductModal = false;
+            this.openPricebookModal = false; // not required
+        } else if (buttonLabel === 'Edit Products') {
+            this.editProductModal = true;
+            this.addProductModal = false; // not required
+            this.openPricebookModal = false; 
+        }
+        else if (buttonLabel === 'Select Pricebook') {
+            this.editProductModal = false;
+            this.addProductModal = false; // not required
+            this.openPricebookModal = true; 
+        }
+    }
+
+    closeModal(){
+        this.addProductModal = false;
+        this.editProductModal = false;
+        this.openPricebookModal = false; 
+        this.showSpinner = true;
+        this.handleFetchDetails();
+    }
+
+
+
+    @track pricebooks = [];
+    @track openPricebook = false;
+    @track selectedPricebook;
+
+    @wire(getPricebooks)
+    wiredPricebooks({ error, data }) {
+        if (data) {
+            this.pricebooks = data.map(pb => ({ label: pb.Name, value: pb.Id }));
+            //this.selectedPricebook = data.fields.Pricebook2Id.value;
+        } 
+        // else if (error) {
+        //     this.showToast('Error', 'Error fetching Pricebooks', 'error');
+        // }
+    }
+
+
+    // @wire(getPricebookName, { opportunityId: '$recordId' })
+    // wiredPricebook({ error, data }) {
+    //     if (data) {
+    //         this.selectedPricebook = data;
+    //         console.log('Selected Pricebook:', this.selectedPricebook);
+    //     } else if (error) {
+    //         console.error('Error fetching Pricebook:', error);
+    //     }
+    // }
+
+    // Add a property to store the wired service result
+wiredPricebookResult; 
+
+@wire(getPricebookName, { opportunityId: '$recordId' })
+wiredPricebook(result) { // Change parameter name to 'result' to capture the full object
+    this.wiredPricebookResult = result; // Store the result here
+    if (result.data) { // Access data using result.data
+        this.selectedPricebook = result.data;
+        console.log('Selected Pricebook:', this.selectedPricebook);
+    } else if (result.error) { // Access error using result.error
+        console.error('Error fetching Pricebook:', result.error);
+    }
+}
+
+    handleChange(event) {
+        this.selectedPricebook = event.target.value;
+        console.log('Selected Pricebook:', this.selectedPricebook);
+    }
+
+    // handleSave() {
+    // if (!this.selectedPricebook) {
+    //     console.log('Clicked on save ::');
+    //     this.showToast('Error', 'Please select a Pricebook before saving.', 'error');
+    //     return;
+    // }
+
+//     handleSave() {
+//     console.log('Clicked on save ::');    
+//     if (!this.selectedPricebook) {
+//         this.showToast('Error', 'Please select a Pricebook before saving.', 'error');
+//         return;
+//     }
+
+//     updatePricebook({ opportunityId: this.recordId, pricebookId: this.selectedPricebook })
+//         .then(() => {
+//             this.showToast('Success', 'Pricebook Selected successfully.', 'success');
+//         })
+//         .catch(error => {
+//             console.error('Error updating PricebookId:', error);
+//             this.showToast('Error', 'Cannot change pricebook on opportunity with line items.', 'error');
+//         });
+
+//         this.closeModal();
+// }
+
+handleSave() {
+    console.log('Clicked on save ::');    
+    if (!this.selectedPricebook) {
+        this.showToast('Error', 'Please select a Pricebook before saving.', 'error');
+        return;
+    }
+
+    updatePricebook({ opportunityId: this.recordId, pricebookId: this.selectedPricebook })
+        .then(() => {
+            this.showToast('Success', 'Pricebook Selected successfully.', 'success');
+            // Use refreshApex to force a re-provision of the wiredPricebook data
+            return refreshApex(this.wiredPricebookResult); 
+        })
+        .then(() => {
+            // Only close the modal AFTER the refresh operation has been initiated
+            this.closeModal();
+        })
+        .catch(error => {
+            console.error('Error updating PricebookId:', error);
+            this.showToast('Error', 'Cannot change pricebook with line items present.', 'error');
+        });
+}
+
+
+
+
+    // Dispatch an event with the selected pricebook
+//     const pricebookEvent = new CustomEvent('pricebookselected', {
+//         detail: { pricebookId: this.selectedPricebook }
+//     });
+
+//     this.dispatchEvent(pricebookEvent);
+//     this.closeModal();
+// }
+
+
+    // openPricebookModal() {
+    //     console.log('Open Pricebook Modal Called::');
+    //     this.openPricebookModal = true;
+    // }
+
+    // closePricebookModal() {
+    //     this.openPricebook = false;
+    // }
+
+    showToast(title, message, variant) {
+        this.dispatchEvent(new ShowToastEvent({
+            title,
+            message,
+            variant
+        }));
+    }
+
+       handleEditProductSave() {
+        // Get child component reference
+        const childComponent = this.template.querySelector('c-product-configurator-edit-component');
+        console.log('childComponent::',childComponent);
+
+        if (childComponent) {
+            this.modifiedProducts = childComponent.getModifiedProducts(); // Get updated products
+            console.log('modifiedProducts in disp::',this.modifiedProducts);
+           // const newBOMLineItems = childComponent.getNewBOMLineItems();
+        }
+
+        console.log('Received updated products:', JSON.stringify(this.modifiedProducts));
+
+        if (Object.keys(this.modifiedProducts).length === 0) {
+            console.log('No changes detected.');
+            return;
+        }
+
+        //update Opportunity Line Items
+        updateOpportunityProduct({ opportunityId:this.recordId,updatedProducts: this.modifiedProducts })
+            .then(() => {
+                console.log('Products updated successfully.');
+                this.closeModal(); // Close the modal
+                this.showToast('Success', 'Opportunity Line Items edited successfully', 'success');
+                window.location.reload();
+
+            })
+            .catch(error => {
+                console.error('Error updating products:', error);
+            });
+            
+    }
+
+}
