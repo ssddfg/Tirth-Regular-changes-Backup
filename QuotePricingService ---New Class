@@ -1,0 +1,58 @@
+public with sharing class QuotePricingService {
+
+    @AuraEnabled
+    public static Decimal getPrice(
+        Id quoteId,
+        Id productId,
+        Id pricebookId
+    ) {
+        Quote q = [
+            SELECT AccountId, INCO_Terms__c
+            FROM Quote
+            WHERE Id = :quoteId
+            LIMIT 1
+        ];
+
+        Date todayDt = Date.today();
+
+        // 1️⃣ RATE CONTRACT CHECK
+        List<Rate_Contract__c> rcList = [
+            SELECT Id
+            FROM Rate_Contract__c
+            WHERE Account__c = :q.AccountId
+              AND INCO_Terms__c = :q.INCO_Terms__c
+              AND Is_Active__c = true
+              AND Rate_Contract_Approved__c = 'Approved'
+              AND Start_Date__c <= :todayDt
+              AND End_Date__c >= :todayDt
+            ORDER BY CreatedDate DESC
+            LIMIT 1
+        ];
+
+        if (!rcList.isEmpty()) {
+            List<Rate_Contract_Line_Item__c> rcli = [
+                SELECT Offer_Price_INCO__c
+                FROM Rate_Contract_Line_Item__c
+                WHERE Rate_Contract__c = :rcList[0].Id
+                  AND Product__c = :productId
+                LIMIT 1
+            ];
+
+            if (!rcli.isEmpty() && rcli[0].Offer_Price_INCO__c != null) {
+                return rcli[0].Offer_Price_INCO__c; // ✅ RC PRICE
+            }
+        }
+
+        // 2️⃣ NDP FALLBACK
+        return [
+            SELECT UnitPrice
+            FROM PricebookEntry
+            WHERE Product2Id = :productId
+              AND Pricebook2Id = :pricebookId
+              AND IsActive = true
+            LIMIT 1
+        ].UnitPrice;
+    }
+
+
+}
