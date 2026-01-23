@@ -1,0 +1,152 @@
+public with sharing class EcatalogueConfigController {
+
+    @AuraEnabled(cacheable=true)
+    public static Map<String, Object> getEcatalogueData() {
+
+        Map<String, Object> response = new Map<String, Object>();
+
+        Ecatalogue_Config__mdt config = [
+            SELECT Base_URL__c 
+            FROM Ecatalogue_Config__mdt 
+            LIMIT 1
+        ];
+
+        User u = [
+            SELECT Id, UserType, Contact.Account.Customer_Number__c
+            FROM User
+            WHERE Id = :UserInfo.getUserId()
+        ];
+
+        Boolean isInternalUser = (u.UserType == 'Standard');
+
+        String dealerCode;
+        if (isInternalUser) {
+            dealerCode = 'TAEX00042'; // internal SF user
+        } else {
+            dealerCode = u.Contact?.Account?.Customer_Number__c;
+        }
+
+        if (String.isBlank(dealerCode)) {
+            throw new AuraHandledException('Dealer code missing');
+        }
+
+        String token = SSOTokenGenerator.generateSSOKey(dealerCode);
+        String finalUrl = config.Base_URL__c + '/index?token=' + token;
+
+        response.put('url', finalUrl);
+        response.put('isInternalUser', isInternalUser);
+
+        return response;
+    }
+}
+
+
+
+
+
+<template>
+    <template if:true={isLoading}>
+        <lightning-spinner alternative-text="Loading eCatalogue..." size="medium"></lightning-spinner>
+    </template>
+
+    <template if:false={isLoading}>
+        <!-- Background image container -->
+        <div class="ecatalogue-container">
+            <!-- DMS / Dealer user → iframe -->
+            <template if:false={isInternalUser}>
+                <template if:true={url}>
+                    <iframe src={url} width="100%" height="800px" frameborder="0"></iframe>
+                </template>
+            </template>
+
+            <!-- Salesforce INTERNAL user → button → new tab -->
+            <template if:true={isInternalUser}>
+                <div class="slds-grid slds-grid_align-end slds-p-around_small">
+                    <lightning-button
+                        label="Open eCatalogue"
+                        variant="brand"
+                        onclick={handleOpenEcatalogue}>
+                    </lightning-button>
+                </div>
+            </template>
+        </div>
+    </template>
+
+    <template if:true={errorMessage}>
+        <div class="slds-text-color_error slds-p-around_medium">
+            {errorMessage}
+        </div>
+    </template>
+</template>
+
+
+
+
+
+
+/*import { LightningElement, track } from 'lwc';
+import getEcatalogueUrl from '@salesforce/apex/EcatalogueConfigController.getEcatalogueUrl';
+
+export default class EcatalogueComponent extends LightningElement {
+    @track url = null;
+    @track isLoading = true;
+    @track errorMessage = null;
+
+    connectedCallback() {
+        this.loadUrl();
+    }
+
+    loadUrl() {
+        this.isLoading = true;
+        this.errorMessage = null;
+
+        getEcatalogueUrl()
+            .then(result => {
+                console.log('>>> eCatalogue URL from Apex:', result);
+                if (result) {
+                    this.url = result;
+                    //this.isLoading = false;
+                } else {
+                    this.errorMessage = 'eCatalogue URL not available. Please contact administrator.';
+                }
+            })
+            .catch(error => {
+                console.error('>>> Apex error:', error);
+                this.errorMessage = error?.body?.message || 'Error while fetching eCatalogue URL.';
+            })
+            .finally(() => {
+                this.isLoading = false;
+            });
+    }
+}*/
+
+
+import { LightningElement, track } from 'lwc';
+import getEcatalogueData from '@salesforce/apex/EcatalogueConfigController.getEcatalogueData';
+
+export default class EcatalogueComponent extends LightningElement {
+    @track url;
+    @track isInternalUser = false;
+    @track isLoading = true;
+    @track errorMessage;
+
+    connectedCallback() {
+        getEcatalogueData()
+            .then(res => {
+                this.url = res.url;
+                this.isInternalUser = res.isInternalUser;
+            })
+            .catch(err => {
+                this.errorMessage = err?.body?.message || 'Error';
+            })
+            .finally(() => {
+                this.isLoading = false;
+            });
+    }
+
+    handleOpenEcatalogue() {
+        window.open(this.url, '_blank');
+    }
+}
+
+
