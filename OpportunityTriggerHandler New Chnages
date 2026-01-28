@@ -1,0 +1,133 @@
+public class OpportunityTriggerHandler extends TriggerHandler {
+    private List<Opportunity> newRecords;
+    private List<Opportunity> oldRecords;
+    private Map<Id, Opportunity> newRecordsMap;
+    private Map<Id, Opportunity> oldRecordsMap;
+
+    public OpportunityTriggerHandler() {
+        super('OpportunityTriggerHandler');
+        this.newRecords = (List<Opportunity>) Trigger.new;
+        this.oldRecords = (List<Opportunity>) Trigger.old;
+        this.newRecordsMap = (Map<Id, Opportunity>) Trigger.newMap;
+        this.oldRecordsMap = (Map<Id, Opportunity>) Trigger.oldMap;
+    }
+
+	
+
+
+	
+
+    public override void afterInsert() {
+        assignRFQOwner(newRecords);
+		//shareOpportunityWithAccountOwner(newRecords); // ✅ NEW
+		
+       	
+
+
+
+if(newRecords != null && !newRecords.isEmpty()) {
+        System.enqueueJob(new OpportunityCommunityShareJob(newRecords));
+    }
+    }
+
+    private static void assignRFQOwner(List<Opportunity> oppList) {
+        if (oppList == null || oppList.isEmpty()) return;
+
+        List<Id> oppIds = new List<Id>();
+        for (Opportunity opp : oppList) {
+            oppIds.add(opp.Id);
+        }
+
+        if (!oppIds.isEmpty()) {
+           RFQAssignmentAsyncServices.assignRFQOwnerAsync(oppIds);
+        }
+    }
+
+
+
+// 🔹 Queueable class inside handler
+public class OpportunityCommunityShareJob implements Queueable {
+
+    private List<Id> oppIds;
+
+    public OpportunityCommunityShareJob(List<Opportunity> oppList) {
+        oppIds = new List<Id>();
+        for (Opportunity o : oppList) {
+            oppIds.add(o.Id);
+        }
+    }
+
+    public void execute(QueueableContext context) {
+
+        /* ------------------ Opportunities ------------------ */
+        List<Opportunity> oppList = [
+            SELECT Id, AccountId
+            FROM Opportunity
+            WHERE Id IN :oppIds
+            AND AccountId != NULL
+        ];
+
+        if (oppList.isEmpty()) return;
+
+        Set<Id> accIds = new Set<Id>();
+        for (Opportunity opp : oppList) {
+            accIds.add(opp.AccountId);
+        }
+
+        /* ------------------ Community (DMS) Users ------------------ */
+        List<User> communityUsers = [
+            SELECT Id, Contact.AccountId
+            FROM User
+            WHERE IsActive = true
+            AND UserType = 'CustomerCommunity'
+            AND ContactId != null
+            AND Contact.AccountId IN :accIds
+        ];
+
+        if (communityUsers.isEmpty()) return;
+
+        /* ------------------ Map Account → Users ------------------ */
+        Map<Id, List<Id>> accToUsers = new Map<Id, List<Id>>();
+        for (User u : communityUsers) {
+            if (!accToUsers.containsKey(u.Contact.AccountId)) {
+                accToUsers.put(u.Contact.AccountId, new List<Id>());
+            }
+            accToUsers.get(u.Contact.AccountId).add(u.Id);
+        }
+
+        /* ------------------ Existing Shares (avoid duplicate) ------------------ */
+        Set<String> existingShares = new Set<String>();
+        for (OpportunityShare os : [
+            SELECT OpportunityId, UserOrGroupId
+            FROM OpportunityShare
+            WHERE OpportunityId IN :oppIds
+        ]) {
+            existingShares.add(os.OpportunityId + '-' + os.UserOrGroupId);
+        }
+
+        /* ------------------ Create Shares ------------------ */
+        List<OpportunityShare> shareList = new List<OpportunityShare>();
+
+        for (Opportunity opp : oppList) {
+            if (!accToUsers.containsKey(opp.AccountId)) continue;
+
+            for (Id userId : accToUsers.get(opp.AccountId)) {
+
+                String key = opp.Id + '-' + userId;
+                if (existingShares.contains(key)) continue;
+
+                OpportunityShare os = new OpportunityShare();
+                os.OpportunityId = opp.Id;
+                os.UserOrGroupId = userId;
+                os.OpportunityAccessLevel = 'Read';
+                os.RowCause = Schema.OpportunityShare.RowCause.Manual;
+                shareList.add(os);
+            }
+        }
+
+        if (!shareList.isEmpty()) {
+            insert shareList;
+        }
+    }
+}
+}
