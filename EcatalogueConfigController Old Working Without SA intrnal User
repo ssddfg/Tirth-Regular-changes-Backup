@@ -1,0 +1,112 @@
+public with sharing class EcatalogueConfigController {
+
+    @AuraEnabled(cacheable=true)
+    public static String getEcatalogueUrl() {
+        String finalUrl = null;
+
+        try {
+            // Get Config Metadata
+            Ecatalogue_Config__mdt config = [
+                SELECT Base_URL__c 
+                FROM Ecatalogue_Config__mdt 
+                LIMIT 1
+            ];
+            if (config == null || String.isBlank(config.Base_URL__c)) {
+                throw new AuraHandledException('Base URL not configured.');
+            }
+
+            // Get dealer code
+            User u = [
+                SELECT Id, Contact.Account.Customer_Number__c 
+                FROM User 
+                WHERE Id = :UserInfo.getUserId() 
+                LIMIT 1
+            ];
+
+			
+            String dealerCode = (u.Contact != null && u.Contact.Account != null) ? 
+                                 u.Contact.Account.Customer_Number__c : null;
+
+			system.debug('dealerCode'+dealerCode);			
+
+            if (String.isBlank(dealerCode)) {
+                throw new AuraHandledException('Dealer code missing for current user.');
+            }
+
+            // Generate token using your class
+            String dealerCodeToken = SSOTokenGenerator.generateSSOKey(dealerCode);
+			system.debug('dealerCodeToken'+dealerCodeToken);			
+
+			//finalUrl='https://ecatalogueuat.shaktiman.co.in/index?token=6I3HJPf%2FG7xezR54IjUEg9FVcNsnseT1FyiX9yCPReI%3D';
+
+            // Build final URL
+                finalUrl = config.Base_URL__c + '/index?token=' + dealerCodeToken;
+			
+			system.debug('dealerCodeToken'+finalUrl);
+
+
+        } catch (AuraHandledException ahe) {
+            throw ahe;
+        } catch (Exception e) {
+            throw new AuraHandledException('Error generating URL: ' + e.getMessage());
+        }
+
+        return finalUrl;
+    }
+}
+
+
+
+<template>
+    <template if:true={isLoading}>
+        <lightning-spinner alternative-text="Loading eCatalogue..." size="medium"></lightning-spinner>
+    </template>
+
+    <template if:false={isLoading}>
+        <iframe src={url} width="100%" height="800px" frameborder="0"></iframe>
+    </template>
+
+    <template if:true={errorMessage}>
+        <div class="slds-text-color_error slds-p-around_medium">
+            {errorMessage}
+        </div>
+    </template>
+</template>
+
+
+
+import { LightningElement, track } from 'lwc';
+import getEcatalogueUrl from '@salesforce/apex/EcatalogueConfigController.getEcatalogueUrl';
+
+export default class EcatalogueComponent extends LightningElement {
+    @track url = null;
+    @track isLoading = true;
+    @track errorMessage = null;
+
+    connectedCallback() {
+        this.loadUrl();
+    }
+
+    loadUrl() {
+        this.isLoading = true;
+        this.errorMessage = null;
+
+        getEcatalogueUrl()
+            .then(result => {
+                console.log('>>> eCatalogue URL from Apex:', result);
+                if (result) {
+                    this.url = result;
+                    //this.isLoading = false;
+                } else {
+                    this.errorMessage = 'eCatalogue URL not available. Please contact administrator.';
+                }
+            })
+            .catch(error => {
+                console.error('>>> Apex error:', error);
+                this.errorMessage = error?.body?.message || 'Error while fetching eCatalogue URL.';
+            })
+            .finally(() => {
+                this.isLoading = false;
+            });
+    }
+}
