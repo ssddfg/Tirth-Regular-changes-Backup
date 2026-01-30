@@ -1,0 +1,230 @@
+/**
+ * @description: To automatically Sync Sales Order Status
+ * @CreatedDate: 3 Mar, 2025
+ * @author: Swetha S
+ * ********/
+public class OrderTriggerHandler extends TriggerHandler {
+    private List<Order> newRecords;
+    private Map<Id, SObject> oldRecordsMap;
+    
+    public OrderTriggerHandler() {
+        System.debug('Inside Trigger');
+        this.newRecords = Trigger.new;
+        this.oldRecordsMap = Trigger.oldMap;
+    }
+    /* Commenting not used in Trigger - Nathan
+    public override void beforeInsert() {
+        assignOpportunityFromPO(newRecords);
+    }
+	*/
+    
+    public override void afterUpdate() {
+        Map<Id, Purchase_Order__c> purchaseOrdersToUpdate = new Map<Id, Purchase_Order__c>();
+        List<Order> listOfOrder = new List<Order>();
+        
+        for (Order ord : newRecords) {
+            Order oldOrder = (Order) oldRecordsMap.get(ord.Id);
+            System.debug('oldOrder'+oldOrder);
+            System.debug('ord'+ord);
+            System.debug('Constants.targetStatuses.contains(ord.Status)'+Constants.targetStatuses.contains(ord.Status));
+            
+            // Check if Status has changed and matches target statuses
+            if (ord.Status != oldOrder.Status && Constants.targetStatuses.contains(ord.Status)) {
+                if (ord.Purchase_Order__c != null) {
+                    System.debug('inside if');
+                    purchaseOrdersToUpdate.put(ord.Purchase_Order__c, new Purchase_Order__c(
+                        Id = ord.Purchase_Order__c,
+                    Stage__c = ord.Status
+                        ));
+                }
+            }
+            /**
+             * @description: Conserve the completed order for target management
+             * @CreatedDate: 17 Mar, 2025
+             * @author: Rahul Saini
+             ********/
+            else if(ord.Status != oldOrder.Status && ord.Status == Constants.orderStatusCompleted){
+                listOfOrder.add(ord);
+            }
+        }
+        
+        System.debug('purchaseOrdersToUpdate'+purchaseOrdersToUpdate);
+        if (!purchaseOrdersToUpdate.isEmpty()) {
+            try {
+                update purchaseOrdersToUpdate.values();
+            } catch (DmlException e) {
+                System.debug('Error updating Purchase Order: ' + e.getMessage());
+            }
+        }
+        
+        /**
+         * @description: Making sure completed order list is not empty, if not then perform the further logic
+         * @CreatedDate: 17 Mar, 2025
+         * @author: Rahul Saini
+         ********/
+        if(!listOfOrder.isEmpty()){
+            System.enqueueJob(new QueueableTargetMap(listOfOrder));
+            // Additional Logic for Target Assignment Sync
+            updateTargetAssignments(listOfOrder);
+        }
+    }
+    
+    /**
+     * @description: Update Target Assignments based on completed Sales Orders
+     * @CreatedDate: 23 Apr, 2025
+     * @author: kratika
+     **/
+    private void updateTargetAssignments(List<Order> completedOrders) {
+        if (completedOrders == null || completedOrders.isEmpty()) {
+            return;
+        }
+        
+        Set<Id> ownerIds = new Set<Id>();
+        for (Order order : completedOrders) {
+            if (order.OwnerId != null) {
+                ownerIds.add(order.OwnerId);
+            }
+        }
+        
+        if (ownerIds.isEmpty()) {
+            return;
+        }
+        
+        // assignments related to owners
+        List<Target_Assignment__c> targetAssignments = [
+            SELECT Id, Assigned_To__c, Target_Plan__c, Target_Plan__r.Product__c
+            FROM Target_Assignment__c
+            WHERE Assigned_To__c IN :ownerIds
+        ];
+        
+        if (targetAssignments.isEmpty()) {
+            return;
+        }
+        
+        //  assignment-product mappings
+        Map<Id, Id> assignmentIdToProductIdMap = new Map<Id, Id>();
+        Set<Id> productIds = new Set<Id>();
+        
+        for (Target_Assignment__c assignment : targetAssignments) {
+            if (assignment.Target_Plan__r != null && assignment.Target_Plan__r.Product__c != null) {
+                assignmentIdToProductIdMap.put(assignment.Id, assignment.Target_Plan__r.Product__c);
+                productIds.add(assignment.Target_Plan__r.Product__c);
+            }
+        }
+        
+        //  Query relevant OrderItems
+        List<OrderItem> orderItems = [
+            SELECT TotalPrice, Quantity, Order.OwnerId, Product2Id
+            FROM OrderItem
+            WHERE OrderId IN (
+                SELECT Id
+                FROM Order
+                WHERE Status = 'Completed' AND OwnerId IN :ownerIds
+            )
+        ];
+        
+        if (orderItems.isEmpty()) {
+            return;
+        }
+        
+        // Calculate amounts and volumes
+        Map<String, Decimal> ownerProductToAmountMap = new Map<String, Decimal>();
+        Map<Id, Decimal> ownerToTotalAmountMap = new Map<Id, Decimal>();
+        
+        Map<String, Decimal> ownerProductToVolumeMap = new Map<String, Decimal>();
+        Map<Id, Decimal> ownerToTotalVolumeMap = new Map<Id, Decimal>();
+        
+        for (OrderItem item : orderItems) {
+            if (item.Order == null || item.Order.OwnerId == null) {
+                continue;
+            }
+            
+            Id ownerId = item.Order.OwnerId;
+            Id productId = item.Product2Id;
+            Decimal totalPrice = item.TotalPrice != null ? item.TotalPrice : 0;
+            Decimal quantity = item.Quantity != null ? item.Quantity : 0;
+            
+            String ownerProductKey = ownerId + '_' + productId;
+            
+            // Update amount per product
+            Decimal currentAmount = ownerProductToAmountMap.containsKey(ownerProductKey) ? ownerProductToAmountMap.get(ownerProductKey) : 0;
+            ownerProductToAmountMap.put(ownerProductKey, currentAmount + totalPrice);
+            System.debug('ownerProductToAmountMap: ' + ownerProductToAmountMap);
+            // Update total amount per user
+            Decimal totalAmount = ownerToTotalAmountMap.containsKey(ownerId) ? ownerToTotalAmountMap.get(ownerId) : 0;
+            ownerToTotalAmountMap.put(ownerId, totalAmount + totalPrice);
+            System.debug('ownerToTotalAmountMap: ' + ownerToTotalAmountMap);
+            // Update volume per product
+            Decimal currentVolume = ownerProductToVolumeMap.containsKey(ownerProductKey) ? ownerProductToVolumeMap.get(ownerProductKey) : 0;
+            ownerProductToVolumeMap.put(ownerProductKey, currentVolume + quantity);
+            System.debug('ownerProductToVolumeMap: ' + ownerProductToVolumeMap);
+            // Update total volume per user
+            Decimal totalVolume = ownerToTotalVolumeMap.containsKey(ownerId) ? ownerToTotalVolumeMap.get(ownerId) : 0;
+            ownerToTotalVolumeMap.put(ownerId, totalVolume + quantity);
+        }
+        System.debug('ownerToTotalVolumeMap: ' + ownerToTotalVolumeMap);
+        
+        //  Prepare updates
+        List<Target_Assignment__c> assignmentsToUpdate = new List<Target_Assignment__c>();
+        
+        for (Target_Assignment__c assignment : targetAssignments) {
+            Decimal achievedAmount = 0;
+            Decimal achievedVolume = 0;
+            
+            if (assignmentIdToProductIdMap.containsKey(assignment.Id)) {
+                String key = assignment.Assigned_To__c + '_' + assignmentIdToProductIdMap.get(assignment.Id);
+                achievedAmount = ownerProductToAmountMap.containsKey(key) ? ownerProductToAmountMap.get(key) : 0;
+                achievedVolume = ownerProductToVolumeMap.containsKey(key) ? ownerProductToVolumeMap.get(key) : 0;
+            } else {
+                achievedAmount = ownerToTotalAmountMap.containsKey(assignment.Assigned_To__c) ? ownerToTotalAmountMap.get(assignment.Assigned_To__c) : 0;
+                achievedVolume = ownerToTotalVolumeMap.containsKey(assignment.Assigned_To__c) ? ownerToTotalVolumeMap.get(assignment.Assigned_To__c) : 0;
+            }
+            
+            assignment.SalesOrderAchievedAmount__c = achievedAmount;
+            assignment.SalesOrderAchievedVolume__c = achievedVolume;
+            assignmentsToUpdate.add(assignment);
+        }
+        
+        // DML update
+        if (!assignmentsToUpdate.isEmpty()) {
+            try {
+                update assignmentsToUpdate;
+            } catch (DmlException ex) {
+                System.debug('Error updating Target Assignments: ' + ex.getMessage());
+            }
+        }
+        
+        
+    }
+    
+    /* 
+    private void assignOpportunityFromPO(List<Order> orders) {
+        // Collect all Purchase Order IDs from incoming Orders
+        Set<Id> poIds = new Set<Id>();
+        for (Order ord : orders) {
+            if (ord.Purchase_Order__c != null) {
+                poIds.add(ord.Purchase_Order__c);
+            }
+        }
+        if (poIds.isEmpty()) return;
+        
+        // Query Purchase Orders and their Opportunities and Accounts
+        Map<Id, Purchase_Order__c> poMap = new Map<Id, Purchase_Order__c>(
+            [SELECT Id, Opportunity__c, Account__c FROM Purchase_Order__c WHERE Id IN :poIds]
+        );
+        
+        // Assign Opportunity__c and AccountId on Order from related Purchase Order
+        for (Order ord : orders) {
+            if (ord.Purchase_Order__c != null && poMap.containsKey(ord.Purchase_Order__c)) {
+                Purchase_Order__c po = poMap.get(ord.Purchase_Order__c);
+                if (po.Opportunity__c != null) {
+                    ord.OpportunityId = po.Opportunity__c;
+                }
+                if ((ord.AccountId == null || ord.AccountId == '') && po.Account__c != null) {
+                    ord.AccountId = po.Account__c;
+                }
+            }
+        }
+    }
+    */
+}
