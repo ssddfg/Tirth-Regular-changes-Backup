@@ -1,0 +1,216 @@
+@IsTest
+public class DisplayProdConfigControllerTest {
+
+      // TEST DATA SETUP
+   
+    @TestSetup
+    static void setupData() {
+
+        // Account
+        Account acc = new Account(Name = 'Test Account');
+        insert acc;
+
+        // Standard Pricebook
+        Id stdPbId = Test.getStandardPricebookId();
+
+        // Product
+        Product2 prod = new Product2(
+            Name = 'Test Product',
+            IsActive = true
+        );
+        insert prod;
+
+        // Pricebook Entry
+        PricebookEntry pbe = new PricebookEntry(
+            Product2Id = prod.Id,
+            Pricebook2Id = stdPbId,
+            UnitPrice = 100,
+            IsActive = true
+        );
+        insert pbe;
+
+        // Opportunity
+        Opportunity opp = new Opportunity(
+            Name = 'Test Opp',
+            StageName = 'Prospecting',
+            CloseDate = Date.today().addDays(10),
+            AccountId = acc.Id,
+            Pricebook2Id = stdPbId
+        );
+        insert opp;
+
+        // OLI
+        insert new OpportunityLineItem(
+            OpportunityId = opp.Id,
+            PricebookEntryId = pbe.Id,
+            Quantity = 1,
+            UnitPrice = 100
+        );
+
+        // Quote
+        Quote q = new Quote(
+            Name = 'Test Quote',
+            OpportunityId = opp.Id,
+            Pricebook2Id = stdPbId,
+            CurrencyIsoCode = 'USD',
+            INCO_Terms__c = 'FOB',
+			Pricing_Type__c = 'Inclusive',
+            Mode_of_Transport__c = '01',
+        );
+        insert q;
+
+        // QLI
+        insert new QuoteLineItem(
+            QuoteId = q.Id,
+            PricebookEntryId = pbe.Id,
+            Quantity = 1,
+            UnitPrice = 100
+        );
+
+        // Purchase Order
+        Purchase_Order__c po = new Purchase_Order__c(
+            Name = 'PO-001',
+            Quote__c = q.Id,
+            CurrencyIsoCode = 'USD'
+        );
+        insert po;
+
+        // Purchase Order Line Item
+        insert new Purchase_Order_Line_Item__c(
+            Purchase_Order__c = po.Id,
+            Product__c = prod.Id,
+            Quantity__c = 1,
+            Unit_Price__c = 100
+        );
+    }
+
+      // getPricebooks
+      
+    @IsTest
+    static void testGetPricebooks() {
+        Test.startTest();
+        List<Pricebook2> pbs = DisplayProdConfigController.getPricebooks();
+        Test.stopTest();
+        System.assert(!pbs.isEmpty());
+    }
+
+   
+       //hasLineItems
+  
+    @IsTest
+    static void testHasLineItems() {
+        Opportunity opp = [SELECT Id FROM Opportunity LIMIT 1];
+        Boolean result = DisplayProdConfigController.hasLineItems(opp.Id);
+        System.assertEquals(true, result);
+    }
+
+      // updatePricebook – Opportunity
+    @IsTest
+    static void testUpdatePricebookOpportunity() {
+        Opportunity opp = [SELECT Id FROM Opportunity LIMIT 1];
+        Id pbId = Test.getStandardPricebookId();
+
+        Test.startTest();
+        DisplayProdConfigController.updatePricebook(opp.Id, pbId);
+        Test.stopTest();
+
+        Opportunity updatedOpp = [
+            SELECT Pricebook2Id
+            FROM Opportunity
+            WHERE Id = :opp.Id
+        ];
+        System.assertEquals(pbId, updatedOpp.Pricebook2Id);
+    }
+
+       //updatePricebook – Quote
+   
+    @IsTest
+    static void testUpdatePricebookQuote() {
+        Quote q = [SELECT Id FROM Quote LIMIT 1];
+        Id pbId = Test.getStandardPricebookId();
+
+        Test.startTest();
+        DisplayProdConfigController.updatePricebook(q.Id, pbId);
+        Test.stopTest();
+
+        Quote updatedQ = [
+            SELECT Pricebook2Id
+            FROM Quote
+            WHERE Id = :q.Id
+        ];
+        System.assertEquals(pbId, updatedQ.Pricebook2Id);
+    }
+
+    //GetPricebookName   
+    @IsTest
+    static void testGetPricebookName() {
+        Opportunity opp = [SELECT Id FROM Opportunity LIMIT 1];
+        Id pbId = DisplayProdConfigController.getPricebookName(opp.Id);
+        System.assertNotEquals(null, pbId);
+    }
+
+      // checkIfPOisInApproval (no approval → false)
+    @IsTest
+    static void testCheckIfPOisInApproval() {
+        Purchase_Order__c po = [SELECT Id FROM Purchase_Order__c LIMIT 1];
+        Boolean result = DisplayProdConfigController.checkIfPOisInApproval(po.Id);
+        System.assertEquals(false, result);
+    }
+
+       //callFetchPricingDetailFromLWC
+  
+    @IsTest
+    static void testCallFetchPricingDetailFromLWC() {
+        Purchase_Order__c po = [SELECT Id FROM Purchase_Order__c LIMIT 1];
+
+        Test.startTest();
+        Map<String, Map<String, String>> result =
+            DisplayProdConfigController.callFetchPricingDetailFromLWC(po.Id);
+        Test.stopTest();
+
+        System.assertNotEquals(null, result);
+    }
+
+    /* =========================================================
+       fetchDetails – Opportunity
+       ========================================================= */
+    @IsTest
+    static void testFetchDetailsOpportunity() {
+        Opportunity opp = [SELECT Id FROM Opportunity LIMIT 1];
+
+        Test.startTest();
+        List<DisplayProdConfigController.OLI_Wrapper> wrappers =
+            DisplayProdConfigController.fetchDetails(opp.Id);
+        Test.stopTest();
+
+        System.assertNotEquals(null, wrappers);
+    }
+
+       //fetchDetails – Quote
+  
+    @IsTest
+    static void testFetchDetailsQuote() {
+        Quote q = [SELECT Id FROM Quote LIMIT 1];
+
+        Test.startTest();
+        List<DisplayProdConfigController.OLI_Wrapper> wrappers =
+            DisplayProdConfigController.fetchDetails(q.Id);
+        Test.stopTest();
+
+        System.assertNotEquals(null, wrappers);
+    }
+
+      // fetchDetails – Purchase Order
+      
+    @IsTest
+    static void testFetchDetailsPurchaseOrder() {
+        Purchase_Order__c po = [SELECT Id FROM Purchase_Order__c LIMIT 1];
+
+        Test.startTest();
+        List<DisplayProdConfigController.OLI_Wrapper> wrappers =
+            DisplayProdConfigController.fetchDetails(po.Id);
+        Test.stopTest();
+
+        System.assertNotEquals(null, wrappers);
+    }
+}
