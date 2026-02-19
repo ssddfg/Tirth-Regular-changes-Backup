@@ -1,0 +1,185 @@
+<template>
+    <lightning-spinner if:true={showSpinner} alternative-text="Loading..." size="medium"></lightning-spinner>
+
+    <lightning-card variant="Narrow" title={componentTitle} icon-name="standard:product" class="card">
+        <lightning-button-group slot="actions">
+            <lightning-button if:false={showOnlyEdit} label="Add Products" onclick={openModal}></lightning-button>
+            <lightning-button if:false={isPOinApproval} label="Edit Products"
+                onclick={openModal}></lightning-button><!--if:false={noProducts}-->
+            <lightning-button if:false={showOnlyEdit} label="Select Pricebook" onclick={openModal}></lightning-button>
+        </lightning-button-group>
+        <div class="table-container slds-scrollable">
+            <template if:true={noProducts}>
+                <c-illustration-component display-text="No Products Added!"></c-illustration-component>
+            </template>
+            <template if:false={noProducts}>
+                <table class="slds-table slds-table_bordered slds-table_cell-buffer custom-table">
+                    <thead>
+                        <tr>
+                            <th colspan="3">Product Name</th>
+                            
+                            <th class="text-align-center">Product Code</th>
+                            <th class="text-align-center">NDP Price</th>
+                            <th class="text-align-center" if:true={showOnlyEdit}>Deviation from NDP</th>
+                            <th class="text-align-center text-align-left" if:true={showOnlyEdit}>FROM RC</th>
+                            <th class="text-align-center" if:true={showOnlyEdit}>RC NDP INCO Price</th>
+                            <th class="text-align-center" if:true={showOnlyEdit}>Deviation from RC</th>
+                            <th class="text-align-center" if:true={showOnlyEdit}>Old Price</th>
+                            <th class="text-align-center">Actual Price</th>
+                            <th class="text-align-center">Quantity</th>
+                            <th class="text-align-center">Total Price</th>
+                            <th class="text-align-center text-align-left">Manf. Instruction</th>
+                            <th class="text-align-center text-align-left">Log. Instruction</th>
+                            <th class="text-align-center text-align-left">Add. Instruction</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template for:each={groupedProducts} for:item="group">
+                            <tr key={group.ProductGroup} class="group-header">
+                                <td colspan="100%" style="padding-left: 7px!important;">
+                                    <span>♠️</span>
+                                    <strong style="padding-left: 2%;">{group.productGroup}</strong>
+                                    <span class="badge" if:true={group.cropSolution}>{group.cropSolution}</span>
+                                    <span class="badge" if:true={group.application}>{group.application}</span>
+                                    <span class="badge" if:true={group.soilType}>{group.soilType}</span>
+                                    <span class="badge" if:true={group.productSeries}>{group.productSeries}</span>
+                                </td>
+                            </tr>
+                            <template for:each={group.products} for:item="product">
+                                <tr key={product.Id} class="product-row">
+                                    <td style="text-align: right; padding-left:1.9%">🔶 </td>
+                                    <td colspan="1" class="clickable-link" data-id={product.Id} onclick={handleNavigate}
+                                        title="Click to view product">
+                                        <span class="link-content">
+                                            {product.ProductName}
+                                            <lightning-icon class="hover-icon" icon-name="utility:chevronright"
+                                                size="xx-small" alternative-text="Go" title="Go"></lightning-icon>
+                                        </span>
+                                    </td>
+
+                                    <td colspan="1">
+                                        <span class="badge product-type">{product.ProductType}</span>
+                                    </td>
+                                    <td class="text-align-center">{product.ProductCode}</td>
+                                    
+                                    <td class="text-align-center" if:false={showOnlyEdit}>{product.ListPrice}</td>
+                                    <td class="text-align-center" if:true={showOnlyEdit}>{product.PBE_Price}</td>
+                                    <td class="text-align-center" if:true={showOnlyEdit}>{product.DeviationPBE}</td>
+                                    <td class="text-align-center" if:true={showOnlyEdit}>{product.FromRateContract}</td>
+                                    <td class="text-align-center" if:true={showOnlyEdit}><span
+                                            if:true={product.FromRateContract}>{product.RC_Price}</span></td>
+                                    <td class="text-align-center" if:true={showOnlyEdit}><span
+                                            if:true={product.FromRateContract}>{product.DeviationRC}</span></td>
+                                    <td class="text-align-center" if:true={showOnlyEdit}>{product.OldPrice}</td>
+                                    <td class="text-align-center">{product.SalesPrice}</td>
+                                    <td class="text-align-center">{product.Quantity}</td>
+                                    <td class="text-align-center">{product.TotalPrice}</td>
+                                    <td class="text-align-center">
+                                        <span class="instruction-fields"
+                                            title={product.manfInstruct}>{product.ManfInstruction}</span>
+                                    </td>
+                                    <td class="text-align-center">
+                                        <span class="instruction-fields"
+                                            title={product.logInstruct}>{product.LogInstruction}</span>
+                                    </td>
+                                    <td class="text-align-center">
+                                        <span class="instruction-fields"
+                                            title={product.addInstruct}>{product.AddInstruction}</span>
+                                    </td>
+                                </tr>
+                                <template if:true={product.bomGroupSummaries}>
+                                    <template for:each={product.bomGroupSummaries} for:item="bomSummary">
+                                        <tr key={bomSummary.groupKey} class="alt-bom-row">
+                                            <td></td>
+                                            <td colspan="9">
+                                                <div class="clickable-link" data-id={bomSummary.Id}
+                                                    onclick={handleNavigate} title="Click to view product">
+                                                    <span class="link-content">
+                                                        <lightning-icon icon-name="utility:chevronright" size="xx-small"
+                                                            alternative-text="Go" title="Go"></lightning-icon>
+                                                        {bomSummary.displayLabel} - {bomSummary.description}<span
+                                                            class="alt-label">(ALT BOM)</span>
+                                                    </span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </template>
+                            </template>
+                        </template>
+                    </tbody>
+                </table>
+            </template>
+
+        </div>
+    </lightning-card>
+
+    <template if:true={editProductModal}>
+        <section role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="modal-heading"
+            class="slds-modal slds-fade-in-open">
+            <div class="slds-modal__container slds-modal_x-large modal-width">
+                <header class="slds-modal__header">
+                    <h2 class="slds-text-heading_medium">Edit Products</h2>
+                    <lightning-button-icon icon-name="utility:close" alternative-text="Close" variant="bare"
+                        onclick={closeModal} class="slds-modal__close"></lightning-button-icon>
+                </header>
+
+                <div class="slds-modal__content slds-p-around_medium">
+                    <c-product-configurator-edit-component record-id={recordId}
+                        pricebook-id={selectedPricebook} onchangesmade={handleChildChanges}></c-product-configurator-edit-component>
+                </div>
+
+                <footer class="slds-modal__footer">
+                    <lightning-button label="Cancel" onclick={closeModal}
+                        style="margin-right : 10px;"></lightning-button>
+                    <lightning-button label="Save" onclick={handleEditProductSave} disabled={isSaveDisabled}></lightning-button>
+                </footer>
+            </div>
+        </section>
+        <div class="slds-backdrop slds-backdrop_open"></div>
+    </template>
+
+    <template if:true={addProductModal}>
+        <section role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="modal-heading"
+            class="slds-modal slds-fade-in-open">
+            <div class="slds-modal__container slds-modal_x-large modal-width">
+                <header class="slds-modal__header">
+                    <h2 class="slds-text-heading_medium">Add Product</h2>
+                    <lightning-button-icon icon-name="utility:close" alternative-text="Close" variant="bare"
+                        onclick={closeModal} class="slds-modal__close"></lightning-button-icon>
+                </header>
+                <div class="slds-modal__content slds-p-around_medium">
+                    <c-product-configurator-component pricebook-id={selectedPricebook}
+                        record-id={recordId}></c-product-configurator-component>
+                </div>
+            </div>
+        </section>
+        <div class="slds-backdrop slds-backdrop_open"></div>
+    </template>
+
+
+    <template if:true={openPricebookModal}>
+        <section role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="modal-heading"
+            class="slds-modal slds-fade-in-open">
+            <div class="slds-modal__container slds-modal_x-small modal-width">
+                <header class="slds-modal__header">
+                    <h2 class="slds-text-heading_medium">Select Pricebook</h2>
+                    <lightning-button-icon icon-name="utility:close" alternative-text="Close" variant="bare"
+                        onclick={closeModal} class="slds-modal__close"></lightning-button-icon>
+                </header>
+                <div class="slds-modal__content slds-p-around_medium">
+                    <lightning-combobox name="pricebook" label="Pricebook" value={selectedPricebook}
+                        placeholder="Select a Pricebook" options={pricebooks} onchange={handleChange}>
+                    </lightning-combobox>
+                </div>
+                <footer class="slds-modal__footer">
+                    <lightning-button label="Cancel" onclick={closeModal}
+                        style="margin-right : 10px;"></lightning-button>
+                    <lightning-button label="Save" onclick={handleSave}></lightning-button>
+                </footer>
+            </div>
+        </section>
+        <div class="slds-backdrop slds-backdrop_open"></div>
+    </template>
+
+</template>
