@@ -1,0 +1,288 @@
+/**
+ * @description: Trigger handler for Product2
+ * @CreatedDate: 18 Mar, 2025
+ * @author: Kratika
+ * @updatedBy : Saurav'28:06:25
+ **/
+public class ProductTriggerHandler extends TriggerHandler {
+    private List<Product2> newRecords;
+    private Map<Id, Product2> oldRecordsMap;
+
+    // Static map to cache record type IDs
+    private static Map<String, Id> recordTypeMap;
+    private static Map<String, Id> productByExternalIdMap;
+
+    public ProductTriggerHandler() {
+        System.debug('Inside ProductTriggerHandler');
+        this.newRecords = Trigger.new;
+        this.oldRecordsMap = (Trigger.oldMap != null) ? (Map<Id, Product2>) Trigger.oldMap : new Map<Id, Product2>();
+    }
+
+    public override void afterInsert() {
+        System.debug('Executing afterInsert in ProductTriggerHandler');
+        
+        // 1. Create default INR, USD, EUR entries
+        Product2MaterialCodeManager.createDefaultCurrencyPricebookEntries(newRecords);
+
+    	// 2. Create PricebookEntries from Pricebook_lines__c
+    		createPricebookEntries(newRecords); 
+    }
+
+		public override void afterUpdate() 
+        {
+            // 1. update PricebookEntries from Pricebook_lines__c
+    		createPricebookEntries(newRecords);
+		}
+
+    public override void beforeInsert() {
+        System.debug('Executing beforeInsert in ProductTriggerHandler');
+        assignRecordTypes();
+        mapProductCodeToExternalId();
+        setProductLookupForAlternateBOM();
+        Product2MaterialCodeManager.validateUniqueMaterialCode(newRecords);
+        Product2MaterialCodeManager.validateAltBOM(newRecords);
+    }
+
+    public override void beforeUpdate() {
+        assignRecordTypes();
+        mapProductCodeToExternalId();
+        setProductLookupForAlternateBOM();
+        Product2MaterialCodeManager.validateAltBOM(newRecords);
+
+    }
+
+    // Assign record type based on Product_Type__c
+    private void assignRecordTypes() {
+        Map<String, String> labelToDevName = new Map<String, String>{
+            'Material'      => 'Material_Finished_Product',
+            'Alternate BOM' => 'Alternate_BOM',
+            'Core'          => 'Core',
+            'Spares'        => 'Spares'
+        };
+
+        if (recordTypeMap == null) {
+            recordTypeMap = new Map<String, Id>();
+            for (RecordType rt : [
+                SELECT Id, DeveloperName
+                FROM RecordType
+                WHERE SObjectType = 'Product2'
+                AND DeveloperName IN :labelToDevName.values()
+            ]) {
+                recordTypeMap.put(rt.DeveloperName, rt.Id);
+            }
+        }
+
+        for (Product2 prod : newRecords) {
+            if (String.isBlank(prod.Product_Type__c)) continue;
+
+            if (oldRecordsMap != null && oldRecordsMap.containsKey(prod.Id)) {
+                Product2 oldProd = oldRecordsMap.get(prod.Id);
+                if (oldProd.Product_Type__c == prod.Product_Type__c) continue;
+            }
+
+            String devName = labelToDevName.get(prod.Product_Type__c);
+            if (String.isNotBlank(devName) && recordTypeMap.containsKey(devName)) {
+                prod.RecordTypeId = recordTypeMap.get(devName);
+                System.debug('Assigned RecordTypeId: ' + prod.RecordTypeId + ' for type: ' + prod.Product_Type__c);
+            }
+        }
+    }
+
+    // Map ProductCode to External ID if not set
+    private void mapProductCodeToExternalId() {
+        for (Product2 prod : newRecords) {
+            if (String.isNotBlank(prod.ProductCode) && String.isBlank(prod.Product_External_Id__c)) {
+                prod.Product_External_Id__c = prod.ProductCode;
+            }
+        }
+    }
+
+    // Set Parent_Product__c based on ProductCode when RecordType = Alternate BOM
+    private void setProductLookupForAlternateBOM() {
+        Set<String> productCodesToSearch = new Set<String>();
+        
+        // Collect relevant ProductCodes
+        for (Product2 prod : newRecords) {
+            System.debug('List of records ' + prod);
+            if (recordTypeMap != null &&
+                recordTypeMap.containsKey('Alternate_BOM') &&
+                prod.RecordTypeId == recordTypeMap.get('Alternate_BOM') &&
+                String.isNotBlank(prod.ProductCode)) {
+                productCodesToSearch.add(prod.ProductCode);
+            }
+        }
+
+        System.debug('Product Codes to Search: ' + productCodesToSearch);
+
+        if (!productCodesToSearch.isEmpty()) {
+            Map<String, Id> codeToIdMap = new Map<String, Id>();
+            for (Product2 p : [
+                SELECT Id, ProductCode
+                FROM Product2
+                WHERE ProductCode IN :productCodesToSearch
+            ]) {
+                codeToIdMap.put(p.ProductCode, p.Id);
+            }
+
+            System.debug('Code to ID Map: ' + codeToIdMap);
+
+            for (Product2 prod : newRecords) {
+                if (recordTypeMap.containsKey('Alternate_BOM') &&
+                    prod.RecordTypeId == recordTypeMap.get('Alternate_BOM') &&
+                    codeToIdMap.containsKey(prod.ProductCode)) {
+                    prod.Parent_Product__c = codeToIdMap.get(prod.ProductCode);
+                }
+            }
+        }
+    }
+
+
+/******************************NEW CODE******************************************/
+
+	public static void processPricebookLines(Set<String> productCodes, List<Product2> newProducts) {
+
+    if (productCodes.isEmpty()) return;
+
+    // STEP 1: Get matching Pricebook Lines
+    List<Pricebook_lines__c> lineList = [
+        SELECT Id, ITEM_CODE__c, LIST_HEADER_ID__c, UNIT_COST__c,
+               START_DATE_ACTIVE__c, END_DATE_ACTIVE__c
+        FROM Pricebook_lines__c
+        WHERE ITEM_CODE__c IN :productCodes
+		AND START_DATE_ACTIVE__c <= TODAY
+    AND END_DATE_ACTIVE__c >= TODAY
+    ];
+    if (lineList.isEmpty()) return;
+
+    // STEP 2: Collect Header IDs
+    Set<String> headerIds = new Set<String>();
+    for (Pricebook_lines__c pl : lineList) {
+        headerIds.add(pl.LIST_HEADER_ID__c);
+    }
+
+    // STEP 3: Get Pricebook2
+    Map<String, Pricebook2> pricebookMap = new Map<String, Pricebook2>();
+    for (Pricebook2 pb : [
+        SELECT Id, Name, Price_Book_External_Id__c, CurrencyIsoCode
+        FROM Pricebook2
+        WHERE Price_Book_External_Id__c IN :headerIds
+        AND IsActive = TRUE
+    ]) {
+        pricebookMap.put(pb.Price_Book_External_Id__c, pb);
+    }
+    if (pricebookMap.isEmpty()) return;
+
+    // STEP 4: ProductCode → ProductId Map
+    Map<String, Id> prodCodeToId = new Map<String, Id>();
+    for (Product2 p : newProducts) {
+        prodCodeToId.put(p.ProductCode, p.Id);
+    }
+
+    // STEP 5: Build keys: pbId + '_' + prodId
+    Set<Id> pricebookIds = new Set<Id>();
+    for (Pricebook2 pb : pricebookMap.values()) {
+        pricebookIds.add(pb.Id);
+    }
+
+    // Fetch existing PBE
+    Map<String, PricebookEntry> existingPBEMap = new Map<String, PricebookEntry>();
+    for (PricebookEntry pbe : [
+        SELECT Id, Pricebook2Id, Product2Id, UnitPrice,
+               Start_Date__c, End_Date__c
+        FROM PricebookEntry
+        WHERE Product2Id IN :prodCodeToId.values()
+        AND Pricebook2Id IN :pricebookIds
+    ]) {
+        existingPBEMap.put(pbe.Pricebook2Id + '_' + pbe.Product2Id, pbe);
+    }
+
+    // ⭐ FINAL LISTS
+    List<PricebookEntry> pbeToInsert = new List<PricebookEntry>();
+    List<PricebookEntry> pbeToUpdate = new List<PricebookEntry>();
+
+    // STEP 6: Insert OR Update logic
+    for (Pricebook_lines__c pl : lineList) {
+
+        if (prodCodeToId.containsKey(pl.ITEM_CODE__c) 
+            && pricebookMap.containsKey(pl.LIST_HEADER_ID__c)) {
+
+            Pricebook2 pb = pricebookMap.get(pl.LIST_HEADER_ID__c);
+            String key = pb.Id + '_' + prodCodeToId.get(pl.ITEM_CODE__c);
+
+            // ⭐ UPDATE EXISTING PBE — WITH START & END DATE LOGIC
+            if (existingPBEMap.containsKey(key)) {
+
+                PricebookEntry existingPBE = existingPBEMap.get(key);
+
+                Boolean needUpdate = false;
+
+                if (existingPBE.UnitPrice != pl.UNIT_COST__c) {
+                    existingPBE.UnitPrice = pl.UNIT_COST__c;
+                    needUpdate = true;
+                }
+
+                if (existingPBE.Start_Date__c != pl.START_DATE_ACTIVE__c) {
+                    existingPBE.Start_Date__c = pl.START_DATE_ACTIVE__c;
+                    needUpdate = true;
+                }
+
+                if (existingPBE.End_Date__c != pl.END_DATE_ACTIVE__c) {
+                    existingPBE.End_Date__c = pl.END_DATE_ACTIVE__c;
+                    needUpdate = true;
+                }
+
+                if (needUpdate) {
+                    pbeToUpdate.add(existingPBE);
+                }
+
+                continue; // skip insert
+            }
+
+            // ⭐ INSERT NEW PBE — WITH START & END DATE LOGIC
+            pbeToInsert.add(new PricebookEntry(
+                Pricebook2Id     = pb.Id,
+                Product2Id       = prodCodeToId.get(pl.ITEM_CODE__c),
+                UnitPrice        = pl.UNIT_COST__c,
+                IsActive         = true,
+                UseStandardPrice = false,
+                CurrencyIsoCode  = pb.CurrencyIsoCode,
+
+                // NEW FIELDS ADDED SAME AS BATCH
+                Start_Date__c    = pl.START_DATE_ACTIVE__c,
+                End_Date__c      = pl.END_DATE_ACTIVE__c
+            ));
+        }
+    }
+
+    // ⭐ Perform DML
+    if (!pbeToInsert.isEmpty()) {
+        insert pbeToInsert;
+    }
+
+    if (!pbeToUpdate.isEmpty()) {
+        update pbeToUpdate;
+    }
+}
+
+
+/******************************NEW CODE******************************************/
+
+
+/*************** NEWLY ADDED METHOD *****************/
+    
+public void createPricebookEntries(List<Product2> newProducts) {
+
+    // Extract product codes from new products
+    Set<String> productCodes = new Set<String>();
+    for (Product2 p : newProducts) {
+        if (String.isNotBlank(p.ProductCode)) {
+            productCodes.add(p.ProductCode);
+        }
+    }
+
+    // Call main logic
+    processPricebookLines(productCodes, newProducts);
+}
+/*************** END NEW METHOD *********************/
+
+}
