@@ -4,7 +4,7 @@ public class PricebookLinesHandler {
         if (newLines == null || newLines.isEmpty()) return;
 
         // ---------------------------
-        // Step 1: Collect header IDs & item codes
+        // Step 1: Collect header IDs & product codes
         // ---------------------------
         Set<String> headerIds = new Set<String>();
         Set<String> productCodes = new Set<String>();
@@ -31,28 +31,17 @@ public class PricebookLinesHandler {
         if (pbMap.isEmpty()) return;
 
         // ---------------------------
-        // Step 3: Map ITEM_CODE__c (ProductCode OR Material_Code__c) → Product Id
-        // ONLY Spares + Material Finished Product
+        // Step 3: Map ProductCode to Product Id
         // ---------------------------
-        Map<String, Id> itemCodeToProdId = new Map<String, Id>();
-
+        Map<String, Id> productCodeToId = new Map<String, Id>();
         for (Product2 p : [
-            SELECT Id, ProductCode, Material_Code__c, RecordType.DeveloperName
+            SELECT Id, ProductCode
             FROM Product2
-            WHERE (ProductCode IN :productCodes OR Material_Code__c IN :productCodes)
-            AND RecordType.DeveloperName IN ('Material_Finished_Product', 'Spares')
+            WHERE ProductCode IN :productCodes
         ]) {
-
-            if (String.isNotBlank(p.ProductCode)) {
-                itemCodeToProdId.put(p.ProductCode, p.Id);
-            }
-
-            if (String.isNotBlank(p.Material_Code__c)) {
-                itemCodeToProdId.put(p.Material_Code__c, p.Id);
-            }
+            productCodeToId.put(p.ProductCode, p.Id);
         }
-
-        if (itemCodeToProdId.isEmpty()) return;
+        if (productCodeToId.isEmpty()) return;
 
         // ---------------------------
         // Step 4: Fetch existing PricebookEntries
@@ -66,12 +55,10 @@ public class PricebookLinesHandler {
                    Start_Date__c, End_Date__c
             FROM PricebookEntry
             WHERE Pricebook2Id IN :pbIds
-            AND Product2Id IN :itemCodeToProdId.values()
+            AND Product2Id IN :productCodeToId.values()
         ]) {
             String key = pbe.Pricebook2Id + '_' + pbe.Product2Id;
-            if (!pbeGroupMap.containsKey(key)) {
-                pbeGroupMap.put(key, new List<PricebookEntry>());
-            }
+            if (!pbeGroupMap.containsKey(key)) pbeGroupMap.put(key, new List<PricebookEntry>());
             pbeGroupMap.get(key).add(pbe);
         }
 
@@ -80,11 +67,6 @@ public class PricebookLinesHandler {
         // ---------------------------
         List<PricebookEntry> pbeToInsert = new List<PricebookEntry>();
         List<PricebookEntry> pbeToUpdate = new List<PricebookEntry>();
-
-        // Duplicate safe
-        Set<String> insertedKeys = new Set<String>();
-        Set<Id> updatedPbeIds = new Set<Id>();
-
         Date today = Date.today();
 
         // ---------------------------
@@ -92,12 +74,11 @@ public class PricebookLinesHandler {
         // ---------------------------
         for (Pricebook_lines__c pl : newLines) {
 
-            if (String.isBlank(pl.ITEM_CODE__c) || String.isBlank(pl.LIST_HEADER_ID__c)) continue;
-
-            if (!itemCodeToProdId.containsKey(pl.ITEM_CODE__c)) continue;
+            // Skip if product or pricebook not found
+            if (!productCodeToId.containsKey(pl.ITEM_CODE__c)) continue;
             if (!pbMap.containsKey(pl.LIST_HEADER_ID__c)) continue;
 
-            Id prodId = itemCodeToProdId.get(pl.ITEM_CODE__c);
+            Id prodId = productCodeToId.get(pl.ITEM_CODE__c);
             Pricebook2 pb = pbMap.get(pl.LIST_HEADER_ID__c);
             String key = pb.Id + '_' + prodId;
 
@@ -115,10 +96,10 @@ public class PricebookLinesHandler {
             if (existingList != null) {
                 for (PricebookEntry e : existingList) {
                     if (e.IsActive) {
-                        activePBE = e;
+                        activePBE = e; // Prefer active PBE
                         break;
                     }
-                    if (inactivePBE == null) inactivePBE = e;
+                    if (inactivePBE == null) inactivePBE = e; // Pick first inactive
                 }
             }
 
@@ -126,40 +107,29 @@ public class PricebookLinesHandler {
             // CASE 1: Active PBE exists
             // ---------------------------
             if (activePBE != null) {
-
                 if (dateValid) {
                     Boolean needUpdate = false;
-
                     if (activePBE.UnitPrice != pl.UNIT_COST__c) {
                         activePBE.UnitPrice = pl.UNIT_COST__c;
                         needUpdate = true;
                     }
-
                     if (activePBE.Start_Date__c != pl.START_DATE_ACTIVE__c) {
                         activePBE.Start_Date__c = pl.START_DATE_ACTIVE__c;
                         needUpdate = true;
                     }
-
                     if (activePBE.End_Date__c != pl.END_DATE_ACTIVE__c) {
                         activePBE.End_Date__c = pl.END_DATE_ACTIVE__c;
                         needUpdate = true;
                     }
-
                     if (!activePBE.IsActive) {
                         activePBE.IsActive = true;
                         needUpdate = true;
                     }
-
-                    if (needUpdate && !updatedPbeIds.contains(activePBE.Id)) {
-                        pbeToUpdate.add(activePBE);
-                        updatedPbeIds.add(activePBE.Id);
-                    }
+                    if (needUpdate) pbeToUpdate.add(activePBE);
                 } else {
-                    if (activePBE.IsActive && !updatedPbeIds.contains(activePBE.Id)) {
-                        activePBE.IsActive = false;
-                        pbeToUpdate.add(activePBE);
-                        updatedPbeIds.add(activePBE.Id);
-                    }
+                    // Invalid → deactivate
+                    if (activePBE.IsActive) pbeToUpdate.add(activePBE);
+                    activePBE.IsActive = false;
                 }
                 continue;
             }
@@ -168,34 +138,25 @@ public class PricebookLinesHandler {
             // CASE 2: No active, but inactive exists
             // ---------------------------
             if (inactivePBE != null) {
-
                 if (dateValid) {
                     Boolean needUpdate = false;
-
                     if (!inactivePBE.IsActive) {
                         inactivePBE.IsActive = true;
                         needUpdate = true;
                     }
-
                     if (inactivePBE.UnitPrice != pl.UNIT_COST__c) {
                         inactivePBE.UnitPrice = pl.UNIT_COST__c;
                         needUpdate = true;
                     }
-
                     if (inactivePBE.Start_Date__c != pl.START_DATE_ACTIVE__c) {
                         inactivePBE.Start_Date__c = pl.START_DATE_ACTIVE__c;
                         needUpdate = true;
                     }
-
                     if (inactivePBE.End_Date__c != pl.END_DATE_ACTIVE__c) {
                         inactivePBE.End_Date__c = pl.END_DATE_ACTIVE__c;
                         needUpdate = true;
                     }
-
-                    if (needUpdate && !updatedPbeIds.contains(inactivePBE.Id)) {
-                        pbeToUpdate.add(inactivePBE);
-                        updatedPbeIds.add(inactivePBE.Id);
-                    }
+                    if (needUpdate) pbeToUpdate.add(inactivePBE);
                 }
                 continue;
             }
@@ -203,9 +164,8 @@ public class PricebookLinesHandler {
             // ---------------------------
             // CASE 3: No existing PBE → insert new
             // ---------------------------
-            if (dateValid && !insertedKeys.contains(key)) {
-
-                pbeToInsert.add(new PricebookEntry(
+            if (dateValid) {
+                PricebookEntry newPBE = new PricebookEntry(
                     Pricebook2Id = pb.Id,
                     Product2Id = prodId,
                     UnitPrice = pl.UNIT_COST__c,
@@ -214,9 +174,8 @@ public class PricebookLinesHandler {
                     CurrencyIsoCode = pb.CurrencyIsoCode,
                     Start_Date__c = pl.START_DATE_ACTIVE__c,
                     End_Date__c = pl.END_DATE_ACTIVE__c
-                ));
-
-                insertedKeys.add(key);
+                );
+                pbeToInsert.add(newPBE);
             }
         }
 
@@ -227,26 +186,30 @@ public class PricebookLinesHandler {
         if (!pbeToInsert.isEmpty()) insert pbeToInsert;
     }
 
-    // ---------------------------
-    // UPDATE CURRENCY
-    // ---------------------------
-    public static void updateCurrency(List<Pricebook_lines__c> newList) {
-        if (newList == null || newList.isEmpty()) return;
+	//UPDATE CURRENCY
+	
+	 public static void updateCurrency(List<Pricebook_lines__c> newList){
+        for(Pricebook_lines__c pl : newList){
 
-        for (Pricebook_lines__c pl : newList) {
-
-            if (pl.LIST_HEADER_ID__c == '02') {
-                pl.CurrencyIsoCode = 'INR';
-            }
-            else if (pl.LIST_HEADER_ID__c == '04') {
+            // If Header = 04 → USD
+            if(pl.LIST_HEADER_ID__c == '04'){
                 pl.CurrencyIsoCode = 'USD';
             }
-            else if (pl.LIST_HEADER_ID__c == '05') {
+
+            // If Header = 05 → EUR
+            else if(pl.LIST_HEADER_ID__c == '05'){
                 pl.CurrencyIsoCode = 'EUR';
             }
-            else {
+
+            // If Header is blank/null → INR
+            else if(String.isBlank(pl.LIST_HEADER_ID__c)){
                 pl.CurrencyIsoCode = 'INR';
             }
         }
     }
+
+
+
+
+
 }
