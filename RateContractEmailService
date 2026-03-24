@@ -1,0 +1,116 @@
+public with sharing class RateContractEmailService {
+
+    @InvocableMethod(label='Send Rate Contract Email')
+    public static void sendRateContractEmail(List<Id> rateContractIds) {
+        
+        for(Id rateContractId : rateContractIds){
+            // Fetch Rate Contract
+            Rate_Contract__c rc = [
+                SELECT Id, Name, Account__c, Account__r.Name, Start_Date__c, End_Date__c,
+                       Customer_Code__c, Objective__c, Management_approval_number__c, Country__c,
+                       Owner.Name, INCO_Terms__c, Is_Active__c, Status__c, 
+                       Rate_Contract_Approved__c, CurrencyIsoCode,
+                       CreatedBy.Name
+                FROM Rate_Contract__c
+                WHERE Id = :rateContractId
+                LIMIT 1
+            ];
+           // Fetch Line Items
+            List<Rate_Contract_Line_Item__c> lineItems = [
+                SELECT Id, Product__r.Name, Product_Code__c, INCO_Terms__c,
+                       NDP_Ex_works__c, Actual_Price__c, Offer_Price_INCO__c, Difference__c
+                FROM Rate_Contract_Line_Item__c
+                WHERE Rate_Contract__c = :rateContractId
+                ORDER BY Name
+            ];
+            String greetingName = 'Finance Team';
+            // Fetch CMDT
+            Rate_Contract_Notification_Config__mdt config1 =
+                [SELECT Email__c, User_Id__c
+                 FROM Rate_Contract_Notification_Config__mdt
+                 LIMIT 1];
+            // If User Id present, get User Name
+            if(config1.User_Id__c != null){
+                User u = [
+                    SELECT Name
+                    FROM User
+                    WHERE Id = :config1.User_Id__c
+                    LIMIT 1
+                ];
+                greetingName = u.Name;
+            }
+            // Build HTML Table
+            String htmlRows = '';
+            Integer counter = 1;
+            for(Rate_Contract_Line_Item__c li : lineItems){
+                htmlRows += '<tr>'
+                          + '<td>' + counter + '</td>'
+                          + '<td>' + (li.Product__r != null ? li.Product__r.Name : 'N/A') + '</td>'
+                          + '<td>' + (li.Product_Code__c != null ? li.Product_Code__c : 'N/A') + '</td>'
+                          + '<td>' + (li.INCO_Terms__c != null ? li.INCO_Terms__c : 'N/A') + '</td>'
+                          + '<td>' + (rc.CurrencyIsoCode != null ? rc.CurrencyIsoCode : 'N/A') + '</td>'
+                          + '<td>' + (li.Actual_Price__c != null ? String.valueOf(li.Actual_Price__c) : 'N/A') + '</td>'
+                          + '<td>' + (li.NDP_Ex_works__c != null ? String.valueOf(li.NDP_Ex_works__c) : 'N/A') + '</td>'
+                          + '<td>' + (li.Offer_Price_INCO__c != null ? String.valueOf(li.Offer_Price_INCO__c) : 'N/A') + '</td>'
+                          + '<td>' + (li.Difference__c != null ? String.valueOf(li.Difference__c) : 'N/A') + '</td>'
+                          + '</tr>';
+                counter++;
+            }
+            String baseUrl = URL.getOrgDomainUrl().toExternalForm();
+            // Account hyperlink
+            String accountDisplay;
+            if (rc.Account__c != null) {
+                accountDisplay =
+                    '<a href="' + baseUrl + '/lightning/r/Account/' + rc.Account__c + '/view" target="_blank">'
+                    + rc.Account__r.Name +
+                    '</a>';
+            } else {
+                accountDisplay = 'N/A';
+            }
+            // Rate Contract hyperlink
+            String rateContractLink =
+                '<a href="' + baseUrl + '/lightning/r/Rate_Contract__c/' + rc.Id + '/view" target="_blank">'
+                + rc.Name +
+                '</a>';
+            // Email Body
+            String htmlBody = 
+                '<p>Hi ' + greetingName + ',</p>' +
+                '<p>The following Rate Contract has been approved:</p>' +
+                '<b>Rate Contract Name:</b> ' + rateContractLink + '<br/>'+
+                '<b>Account Name:</b> ' + accountDisplay + '<br/>'+
+                '<b>Valid From:</b> ' + (rc.Start_Date__c != null ? rc.Start_Date__c.format() : 'N/A') + '<br/>' +
+                '<b>Valid To:</b> ' + (rc.End_Date__c != null ? rc.End_Date__c.format() : 'N/A') + '<br/>'+
+                '<b>Customer Code:</b> ' + (rc.Customer_Code__c != null ? rc.Customer_Code__c : 'N/A') + '<br/>' +
+                '<b>Currency:</b> ' + (rc.CurrencyIsoCode != null ? rc.CurrencyIsoCode : 'N/A') + '<br/>' +
+                '<b>Created By:</b> ' + rc.CreatedBy.Name + '<br/><br/>' +
+                '<table border="1" cellpadding="5" cellspacing="0">' +
+                '<tr>' +
+                '<th>Sr. No</th>' +
+                '<th>Product Name</th>' +
+                '<th>Product Code</th>' +
+                '<th>INCO Terms</th>' +
+                '<th>Currency</th>' +
+                '<th>Actual Price</th>' +
+                '<th>NDP Ex-works</th>' +
+                '<th>Offer Price</th>' +
+                '<th>Difference(%)</th>' +
+                '</tr>' +
+                htmlRows +
+                '</table>' +
+                '<br/><br/><p>Please update the pricing in SAP at the earliest and acknowledge once completed.</p>';
+            // Fetch Email from Custom Metadata
+            Rate_Contract_Notification_Config__mdt config =
+                [SELECT Email__c
+                 FROM Rate_Contract_Notification_Config__mdt
+                 LIMIT 1];            
+            // Send Email
+            Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+            if(config.Email__c != null){
+                mail.setToAddresses(new List<String>{ config.Email__c });
+            }
+            mail.setSubject('Rate Contract Approved: ' + rc.Name);
+            mail.setHtmlBody(htmlBody);
+            Messaging.sendEmail(new List<Messaging.SingleEmailMessage>{ mail });
+        }
+    }
+}
