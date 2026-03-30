@@ -439,3 +439,195 @@ export default class GenerateClaimComponent extends NavigationMixin(LightningEle
         this.isLoading = false;
     }
 }
+
+
+
+
+/*************************************************************************************************/
+
+public with sharing class ClaimController {
+    
+    @AuraEnabled
+    public static WarrantyCheckResult checkWarranty(String assetId) {
+        
+        // check if asset Exists
+        List<Asset> assetDetails = [SELECT Id, Name, Invoice__c, Invoice__r.Name, Invoice__r.CreatedDate, Product2Id FROM Asset WHERE Id = :assetId LIMIT 1];
+        if (assetDetails.isEmpty()) {
+            throw new AuraHandledException('Asset not found');
+        }
+        
+        WarrantyCheckResult result = new WarrantyCheckResult();
+        
+        try {
+            // Check if asset has active warranty
+            List<AssetWarranty> warranties = [
+                SELECT Id, StartDate, EndDate, WarrantyType 
+                FROM AssetWarranty 
+                WHERE AssetId = :assetId 
+                AND StartDate <= TODAY 
+                AND Type__c = 'PDI'
+                ORDER BY EndDate DESC
+                LIMIT 1
+            ];
+            
+            System.debug('Warranties found: ' + warranties);
+            
+            if (!warranties.isEmpty()) {
+                result.hasWarranty = true;
+                result.warrantyDetails = warranties[0];
+                
+                if(!assetDetails.isEmpty()){
+                    result.assetDetails = assetDetails[0];
+                }
+            } else {
+                result.hasWarranty = false;
+            }
+            
+            System.debug('Warranty Check Result: ' + result.hasWarranty);
+        } catch (Exception e) {
+            throw new AuraHandledException('Error checking warranty: ' + e.getMessage());
+        }
+        
+        return result;
+    }
+    
+    @AuraEnabled
+    public static String submitClaim(
+        String caseId,
+    String claimType,
+    String comments,
+    String invoiceNumber,
+    String invoiceDate,
+    Decimal claimAmount,
+    String fileName,
+    String fileContent,
+    String fileType
+    ) {
+        
+        Savepoint sp = Database.setSavepoint();
+        try {
+            // Validate required parameters
+            if (String.isBlank(caseId) || String.isBlank(claimType) || String.isBlank(comments)) {
+                throw new AuraHandledException('required fields are missing');
+            }
+            
+            // Get case record to validate and get additional fields
+            Case caseRecord = [SELECT Id, AccountId, Asset__c FROM Case WHERE Id = :caseId LIMIT 1];
+            System.debug('Case Record: ' + caseRecord);
+            System.debug('Account Record: ' + caseRecord.AccountId);
+            
+            if (caseRecord == null) {
+                throw new AuraHandledException('Case record not found');
+            }
+            
+            // Fetch Asset Details
+            List<Asset> assets = [SELECT Id, Name, Customer__c, Product2Id, Invoice__r.Name FROM Asset WHERE Id = :caseRecord.Asset__c LIMIT 1];
+            
+            // Validate claim type specific fields
+            if (claimType == 'Reimbursement' && (claimAmount == null || claimAmount <= 0)) {
+                throw new AuraHandledException('Valid claim amount is required for reimbursement claims');
+            }
+            
+            // Create and populate the claim record
+            Warranty_Claim__c claim = new Warranty_Claim__c();
+            
+            // Get the RecordTypeId based on claimType
+            String recordTypeDeveloperName = (claimType == 'FOC') ? 'FOC_Claim' : 'Reimbursement_Claim';
+            Id recordTypeId = Schema.SObjectType.Warranty_Claim__c.getRecordTypeInfosByDeveloperName().get(recordTypeDeveloperName).getRecordTypeId();
+            
+            // Assign the record type and common fields
+            claim.RecordTypeId = recordTypeId;
+            claim.Case__c = caseId;
+            claim.Claim_Type__c = claimType;
+            claim.Comments__c = comments;
+            claim.Asset__c = caseRecord?.Asset__c;
+            claim.Distributor_Dealer__c = assets[0]?.Customer__c;
+            claim.Invoice_Number__c = assets[0]?.Invoice__r?.Name;
+            
+            // Set claim type specific fields
+            if (claimType == 'Reimbursement') {
+                claim.Invoice_Number__c = invoiceNumber;
+                claim.Claim_Amount__c = claimAmount;
+                // Handle invoice date conversion
+                try {
+                    claim.Invoice_Date__c = Date.valueOf(invoiceDate);
+                } catch (Exception e) {
+                    throw new AuraHandledException('Invalid invoice date format. Please use YYYY-MM-DD format.');
+                }
+            } else if (claimType == 'FOC') {
+                try{
+                    // Create Purchase Order
+                    Purchase_Order__c purchaseOrder = new Purchase_Order__c();
+                    purchaseOrder.Account__c = caseRecord?.AccountId;
+                    purchaseOrder.Case__c = caseId;
+                    purchaseOrder.REQ_DATE_H__c = Date.today();
+                    purchaseOrder.PURCH_DATE__c = Date.today();
+                    purchaseOrder.is_FOC_PO__c = true;
+                    // purchaseOrder.INCO_Terms__c = 'CFR';
+                    insert purchaseOrder;
+                    
+                    // Create Purchase Order Line Item
+                    Purchase_Order_Line_Item__c polItem = new Purchase_Order_Line_Item__c();
+                    polItem.Purchase_Order__c = purchaseOrder.Id;
+                    polItem.Product__c = assets[0].Product2Id;
+                    polItem.Quantity__c = 1;
+                    polItem.Unit_Price__c = 0;
+                    insert polItem;
+                    
+                    claim.Purchase_Order__c = purchaseOrder.Id;
+                }catch (Exception e) {
+                    Database.rollback(sp);
+                    System.debug('Error creating Purchase Order: ' + e.getMessage());
+                    System.debug('Error Line Number: ' + e.getLineNumber());
+                    throw new AuraHandledException('Error creating Purchase Order: ' + e.getMessage());
+                }
+            }
+            
+            // Insert the claim record
+            insert claim;
+            
+            // Handle file attachment if present
+            if (String.isNotBlank(fileContent)) {
+                try {
+                    ContentVersion cv = new ContentVersion();
+                    cv.VersionData = EncodingUtil.base64Decode(fileContent);
+                    cv.Title = fileName;
+                    cv.PathOnClient = fileName;
+                    cv.FirstPublishLocationId = caseId;
+                    insert cv;
+                    
+                    // Link file to both case and claim
+                    ContentDocumentLink cdl = new ContentDocumentLink();
+                    cdl.ContentDocumentId = [SELECT ContentDocumentId FROM ContentVersion WHERE Id = :cv.Id].ContentDocumentId;
+                    cdl.LinkedEntityId = claim.Id;
+                    cdl.ShareType = 'V';
+                    cdl.Visibility = 'AllUsers';
+                    insert cdl;
+                } catch (Exception e) {
+                    Database.rollback(sp);
+                    System.debug('Error attaching file: ' + e.getMessage());
+                    // Don't fail the entire operation if file attachment fails
+                }
+            }
+            
+            return claim.Id;
+            
+        } catch (Exception e) {
+            Database.rollback(sp);
+            System.debug('Exception in submitClaim: ' + e.getMessage() + '\n' + e.getStackTraceString());
+            throw new AuraHandledException('Error submitting claim: ' + e.getMessage() + ' \n' + e.getStackTraceString());
+        }
+    }
+    
+    @AuraEnabled(cacheable=true)
+    public static Case getCaseDetails(String caseId) {
+        return [SELECT Id, Asset__c, AccountId FROM Case WHERE Id = :caseId];
+    }
+    
+    // Wrapper class for warranty check result
+    public class WarrantyCheckResult {
+        @AuraEnabled public Boolean hasWarranty { get; set; }
+        @AuraEnabled public AssetWarranty warrantyDetails { get; set; }
+        @AuraEnabled public Asset assetDetails { get; set; }
+    }
+}
