@@ -1,0 +1,441 @@
+<template>
+    <lightning-quick-action-panel header="Generate Warranty Claim">
+        <div>
+            <!-- Loading State -->
+            <template if:true={isLoading}>
+                <div class="slds-align_absolute-center slds-m-vertical_x-large" style=" position: relative;">
+                    <lightning-spinner alternative-text="Loading" size="medium" variant="brand"></lightning-spinner>
+                </div>
+            </template>
+
+            <!-- Content -->
+            <template if:false={isLoading}>
+                <!-- Warranty Status Card -->
+                <div class="slds-box slds-m-bottom_medium slds-theme_default">
+                    <div class="slds-grid slds-grid_align-spread slds-grid_vertical-align-center">
+                        <div class="slds-media">
+                            <div class="slds-media__figure">
+                                <lightning-icon icon-name="utility:ribbon" size="small"
+                                    class="slds-icon-text-default"></lightning-icon>
+                            </div>
+                            <div class="slds-media__body">
+                                <h2 class="slds-text-heading_small slds-text-color_default">Warranty Status</h2>
+                                <p class="slds-text-body_small slds-text-color_weak">
+                                    <template if:true={hasWarranty}>
+                                        Coverage active since {warrantyDetails.Start_date__c}
+                                    </template>
+                                    <template if:false={hasWarranty}>
+                                        No active coverage found
+                                    </template>
+                                </p>
+                            </div>
+                        </div>
+                        <div>
+                            <template if:true={hasWarranty}>
+                                <span if:true={warrantyDetails.EndDate} class="slds-badge slds-theme_success slds-p-horizontal_small">
+                                    <lightning-icon icon-name="utility:success" size="x-small"
+                                        class="slds-m-right_xx-small"></lightning-icon>
+                                    Valid until {warrantyDetails.EndDate}
+                                </span>
+                            </template>
+                            <template if:false={hasWarranty}>
+                                <span class="slds-badge slds-theme_error slds-p-horizontal_small">
+                                    <lightning-icon icon-name="utility:error" size="x-small"
+                                        class="slds-m-right_xx-small"></lightning-icon>
+                                    No valid warranty
+                                </span>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Claim Form -->
+                <template if:true={hasWarranty}>
+                    <div class="slds-box slds-theme_default">
+                        <!-- Claim Type Selection -->
+                        <div class="slds-form-element slds-m-bottom_large">
+                            <div class="slds-form-element__control slds-m-top_small">
+                                <lightning-radio-group name="claimType" options={claimTypeOptions}
+                                    value={formState.claimType} onchange={handleInputChange} variant="button-group"
+                                    type="button" class="claim-type-radio" label="Claim Type">
+                                </lightning-radio-group>
+                            </div>
+                        </div>
+
+                        <!-- Reimbursement Fields -->
+                        <template if:true={showReimbursementFields}>
+                            <div class="slds-grid slds-wrap slds-gutters">
+                                <div class="slds-col slds-size_1-of-2 slds-p-right_small">
+                                    <lightning-input type="text" name="invoiceNumber" value={formState.invoiceNumber}
+                                        placeholder="Enter invoice number" 
+                                        label="Invoice Number" message-when-value-missing="Please enter invoice number" disabled>
+                                    </lightning-input>
+                                </div>
+                                <div class="slds-col slds-size_1-of-2">
+                                    <lightning-input type="date" name="invoiceDate" value={formState.invoiceDate}
+                                        placeholder="Select invoice date" 
+                                        label="Invoice Date" message-when-value-missing="Please select invoice date" disabled>
+                                    </lightning-input>
+                                </div>
+                            </div>
+
+                            <div class="slds-grid slds-wrap slds-gutters slds-m-top_small">
+                                <div class="slds-col slds-size_1-of-2 slds-p-right_small">
+                                    <lightning-input type="number" name="claimAmount" value={formState.claimAmount}
+                                        onchange={handleInputChange} placeholder="0.00" min="0" step="0.01"
+                                        formatter="currency" required label="Claim Amount"
+                                        message-when-value-missing="Please enter claim amount">
+                                    </lightning-input>
+                                </div>
+                            </div>
+
+                            <div class="slds-m-top_medium">
+                                <div class="slds-form-element">
+                                    <div class="slds-form-element__control">
+                                        <div class="slds-file-selector slds-file-selector_files">
+                                            <div class="slds-file-selector__dropzone">
+                                                <lightning-input type="file" accept=".pdf,.jpg,.jpeg,.png"
+                                                    onchange={handleFileUpload}
+                                                    class="slds-file-selector__input" label="Upload Invoice">
+                                                </lightning-input>
+                                            </div>
+                                        </div>
+                                        <template if:true={formState.file}>
+                                            <div class="slds-m-top_small slds-media">
+                                                <div class="slds-media__figure">
+                                                    <lightning-icon icon-name="utility:check" size="small"
+                                                        class="slds-icon-text-success"></lightning-icon>
+                                                </div>
+                                                <div class="slds-media__body">
+                                                    <span class="slds-p-left_xx-small">{formState.file.name}</span>
+                                                    <span
+                                                        class="slds-text-color_weak slds-p-left_xx-small">({formState.file.size}
+                                                        MB)</span>
+                                                </div>
+                                            </div>
+                                        </template>
+                                        <div class="slds-form-element__help slds-text-color_weak slds-m-top_xx-small">
+                                            Accepted formats: PDF, JPG, PNG (Max 5MB)</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- FOC Fields -->
+                        <template if:true={showFOCFields}>
+                            <!-- <div class="slds-grid slds-wrap slds-gutters">
+                                <div class="slds-col slds-size_1-of-2 slds-p-right_small">
+                                    <lightning-input type="text" name="poNumber" value={formState.poNumber}
+                                        onchange={handleInputChange} placeholder="Enter PO Number" required
+                                        label="PO Number" message-when-value-missing="Please enter PO Number">
+                                    </lightning-input>
+                                </div>
+                            </div> -->
+                        </template>
+
+                        <!-- Common Comments Field -->
+                        <div class="slds-m-top_medium">
+                            <lightning-textarea name="comments" value={formState.comments} onchange={handleInputChange}
+                                placeholder="Describe the issue and reason for claim" maxlength="500" required
+                                label="Comments" message-when-value-missing="Please enter comments">
+                            </lightning-textarea>
+                            <div class="slds-grid slds-grid_align-spread slds-m-top_xx-small">
+                                <div class="slds-form-element__help slds-text-color_weak">Max 500 characters</div>
+                                <div class="slds-form-element__help">{commentsLength}/500</div>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </template>
+        </div>
+
+        <!-- Footer -->
+        <div slot="footer">
+            <lightning-button variant="neutral" label="Cancel" onclick={handleCancel} class="slds-m-right_small" disabled={isLoading}></lightning-button>
+            <lightning-button variant="brand" label="Submit Claim" onclick={handleSubmit} disabled={isSubmitDisabled}
+                icon-name="utility:check" icon-position="right"></lightning-button>
+        </div>
+    </lightning-quick-action-panel>
+</template>
+
+/************************************************************************************/
+
+
+import { LightningElement, api, wire, track } from 'lwc';
+import { CloseActionScreenEvent } from 'lightning/actions';
+import { getRecord } from 'lightning/uiRecordApi';
+import { ShowToastEvent } from 'lightning/platformShowToastEvent';
+import checkWarranty from '@salesforce/apex/ClaimController.checkWarranty';
+import submitClaim from '@salesforce/apex/ClaimController.submitClaim';
+import { NavigationMixin } from 'lightning/navigation';
+import { CurrentPageReference } from 'lightning/navigation';
+
+const CASE_FIELDS = ['Case.Asset__c', 'Case.AccountId'];
+const MAX_FILE_SIZE_MB = 5;
+const MAX_COMMENT_LENGTH = 500;
+
+export default class GenerateClaimComponent extends NavigationMixin(LightningElement) {
+    @api recordId;
+    @track isLoading = true;
+    @track hasWarranty = false;
+    @track warrantyDetails = {};
+    @track showPOModal = false;
+    @track isSubmitted = false;
+
+    @track formState = {
+        claimType: '',
+        comments: '',
+        poNumber: null,
+        invoiceNumber: '',
+        invoiceDate: '',
+        claimAmount: null,
+        file: null
+    };
+    
+
+    claimTypeOptions = [
+        { label: 'Reimbursement', value: 'Reimbursement' },
+        { label: 'FOC (Free of Cost)', value: 'FOC' }
+    ];
+
+    // For Community pages or when recordId isn't automatically provided
+    // @wire(CurrentPageReference)
+    // checkPageReference(currentPageReference) {
+    //     if (currentPageReference) {
+    //         console.log('Current Page Reference:', JSON.stringify(currentPageReference));
+    //         // If @api recordId wasn't populated, check URL parameters
+    //         if (!this.recordId) {
+    //             const state = currentPageReference.state;
+    //             console.log('Current Page Reference:', JSON.stringify(currentPageReference));
+                
+    //             // Check all possible parameter names used in different contexts
+    //             this.recordId = state?.recordId || 
+    //                            state?.c__recordId || 
+    //                            state?.id ||
+    //                            currentPageReference.attributes?.recordId;
+                
+    //             console.log('Record ID from URL:', this.recordId);
+    //         }
+    //     }
+    // }
+
+    @wire(getRecord, { recordId: '$recordId', fields: CASE_FIELDS })
+    wiredCase({ error, data }) {
+        if (data) {
+            this.caseRecord = data;
+            this.checkAssetWarranty();
+        } else if (error) {
+            this.handleError('Case data error', error.body.message);
+        }
+    }
+
+    async checkAssetWarranty() {
+        const assetId = this.caseRecord?.fields?.Asset__c?.value;
+        if (!assetId) {
+            this.hasWarranty = false;
+            this.isLoading = false;
+            this.showWarning('No asset associated with this case');
+            return;
+        }
+
+        try {
+            const result = await checkWarranty({ assetId });
+            this.hasWarranty = result.hasWarranty;
+            this.warrantyDetails = result.warrantyDetails || {};
+            console.log('this.warrantyDetails : '+ JSON.stringify(this.warrantyDetails));
+
+            // Auto-populate invoice number and date if available
+             if (result.assetDetails) {
+                this.formState = {
+                    ...this.formState,
+                    invoiceNumber: result.assetDetails.Invoice__r?.Name || '',
+                    invoiceDate: result.assetDetails.Invoice__r?.CreatedDate
+                        ? result.assetDetails.Invoice__r.CreatedDate.split('T')[0]
+                        : ''
+                };
+
+                console.log('Form state after setting invoice:', JSON.stringify(this.formState));
+
+            }
+
+            if (!result.hasWarranty) {
+                this.showWarning('The asset has no valid warranty');
+            }
+        } catch (error) {
+            this.handleError('Warranty check error', error.body.message);
+        } finally {
+            this.isLoading = false;
+        }
+    }
+
+    handleInputChange(event) {
+        const { name, value } = event.target;
+
+        console.log('Input changed:', name, value);
+
+        if (name === 'claimType') {
+            this.resetFormFields(value);
+        }
+
+        this.formState = {
+            ...this.formState,
+            [name]: value
+        };
+    }
+
+    resetFormFields(claimType) {
+        const resetFields = {
+            claimType,
+            claimAmount: null,
+            poNumber: null,
+            file: null
+        };
+
+        this.formState = {
+            ...this.formState,
+            ...resetFields
+        };
+
+        const fileInput = this.template.querySelector('lightning-input[type="file"]');
+        if (fileInput) {
+            fileInput.value = '';
+        }
+    }
+
+    handleFileUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const fileSizeMB = file.size / (1024 * 1024);
+        if (fileSizeMB > MAX_FILE_SIZE_MB) {
+            this.showError(`File size exceeds ${MAX_FILE_SIZE_MB}MB limit`);
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            this.formState = {
+                ...this.formState,
+                file: {
+                    name: file.name,
+                    size: fileSizeMB.toFixed(2),
+                    content: reader.result.split(',')[1],
+                    type: file.type
+                }
+            };
+        };
+        reader.onerror = () => {
+            this.handleError('File reading error', 'Could not read the file');
+        };
+        reader.readAsDataURL(file);
+    }
+
+    handleSubmit() {
+        if (this.isSubmitDisabled) return;
+
+        this.isLoading = true;
+        this.isSubmitted = true;
+
+        const params = {
+            caseId: this.recordId,
+            claimType: this.formState.claimType,
+            comments: this.formState.comments,
+            invoiceNumber: this.formState.invoiceNumber,
+            invoiceDate: this.formState.invoiceDate,
+            claimAmount: this.formState.claimType === 'Reimbursement' ? this.formState.claimAmount : null,
+            fileName: this.formState.file?.name,
+            fileContent: this.formState.file?.content,
+            fileType: this.formState.file?.type
+        };
+
+        submitClaim(params)
+            .then(claimId => {
+                if (!claimId) {
+                    this.showError('Claim ID is missing. Navigation failed.');
+                    return;
+                }
+
+                this.showToast('Success', 'Claim submitted successfully', 'success');
+
+                this[NavigationMixin.Navigate]({
+                    type: 'standard__recordPage',
+                    attributes: {
+                        recordId: claimId,
+                        actionName: 'view'
+                    }
+                });
+
+                this.dispatchEvent(new CloseActionScreenEvent());
+            })
+            .catch(error => {
+                this.handleError('Claim submission error', error.body?.message || 'Failed to submit claim');
+                // this.handleError('Submission error', 'No matching Purchase Order found for the provided PO number.');
+            })
+            .finally(() => {
+                this.isLoading = false;
+            });
+    }
+
+    handleCancel() {
+        this.dispatchEvent(new CloseActionScreenEvent());
+    }
+
+    get showReimbursementFields() {
+        return this.formState.claimType === 'Reimbursement';
+    }
+
+    get showFOCFields() {
+        return this.formState.claimType === 'FOC';
+    }
+
+    get isSubmitDisabled() {
+        // Disable if loading
+        if (this.isLoading) {
+            return true;
+        }
+        // Always disabled if no warranty or no claim type selected
+        if (!this.hasWarranty || !this.formState.claimType) {
+            return true;
+        }
+        // Common validation for both claim types
+        if (!this.formState.comments?.trim()) {
+            return true;
+        }
+        // Claim type specific validation
+        if (this.formState.claimType === 'Reimbursement') {
+            return !this.formState.invoiceNumber ||
+                !this.formState.invoiceDate ||
+                !this.formState.claimAmount        } 
+        else if (this.formState.claimType === 'FOC') {
+            return false; // FOC does not require invoice or claim amount   
+        }
+        // Default to disabled if we get here
+        return true;
+    }
+
+    get commentsLength() {
+        return this.formState.comments?.length || 0;
+    }
+
+    showToast(title, message, variant) {
+        this.dispatchEvent(new ShowToastEvent({ title, message, variant }));
+    }
+
+    showSuccess(message) {
+        this.showToast('Success', message, 'success');
+    }
+
+    showWarning(message) {
+        this.showToast('Warning', message, 'warning');
+    }
+
+    showError(message) {
+        this.showToast('Error', message, 'error');
+    }
+
+    handleError(context, error) {
+        console.error(context, error);
+        this.showError(error);
+        this.isLoading = false;
+    }
+}
