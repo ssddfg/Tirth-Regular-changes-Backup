@@ -1,0 +1,161 @@
+public class  PricebookLinesBatch implements Database.Batchable<SObject>, Database.Stateful, Schedulable {
+    public String queryString = '';
+
+    public PricebookLinesBatch() {}
+    public PricebookLinesBatch(String queryString) {
+        this.queryString = queryString;
+    }
+
+    public void execute(SchedulableContext sc) {
+        if (queryString != null) {
+            Database.executeBatch(new PricebookLinesBatch(queryString), 50);
+        } else {
+            Database.executeBatch(new PricebookLinesBatch(), 50);
+        }
+    }
+
+    public Database.QueryLocator start(Database.BatchableContext bc) {
+        String query = 'SELECT Id, END_DATE_ACTIVE__c, ITEM_CODE__c, LIST_HEADER_ID__c, ' +
+                       'LIST_LINE_ID__c, START_DATE_ACTIVE__c, UNIT_COST__c, STATUS__c ' +
+                       'FROM Pricebook_lines__c WHERE START_DATE_ACTIVE__c < TODAY AND END_DATE_ACTIVE__c > TODAY ';
+
+        if (queryString != null) {
+            query += ' ' + queryString;
+        }
+
+        return Database.getQueryLocator(query);
+    }
+
+    public void execute(Database.BatchableContext bc, List<Pricebook_lines__c> scope) {
+        Map<String, Pricebook_lines__c> selectedPrices = new Map<String, Pricebook_lines__c>();
+        Map<String, String> codeToCurrecyISOCode = new Map<String, String>{
+            '04' => 'USD',
+            '05' => 'EUR'
+        };
+
+         Set<String> pricebookWithProductSet = new Set<String>();
+        Set<String> pricebookIdSet = new Set<String>();
+        Set<String> productIdSet = new Set<String>();
+
+        for (Pricebook_lines__c line : scope) {
+            if (line.LIST_HEADER_ID__c != null && line.ITEM_CODE__c != null) {
+                String key = line.LIST_HEADER_ID__c + '-' + line.ITEM_CODE__c;
+                
+                 if(line.LIST_HEADER_ID__c  != null && line.ITEM_CODE__c !=null){
+                        pricebookWithProductSet.add(line.LIST_HEADER_ID__c + '-'+ line.ITEM_CODE__c);
+                        pricebookIdSet.add(line.LIST_HEADER_ID__c);
+                        productIdSet.add(line.ITEM_CODE__c);
+                 }    
+
+            }
+        }
+        
+        Set<String> existingRecordSet = new Set<String>();
+        Map<String,PricebookEntry> existingRecordMap = new Map<String,PricebookEntry>();
+        for(PricebookEntry  priceEntry : [SELECT Id,External_Id__c ,Pricebook2.Price_Book_External_Id__c ,Product2.Material_Code__c  
+                                                        FROM PricebookEntry WHERE
+                                                        Pricebook2.Price_Book_External_Id__c IN :pricebookIdSet AND 
+                                                        Product2.Material_Code__c IN :productIdSet]){
+        		String key = priceEntry.Pricebook2.Price_Book_External_Id__c + '-' + priceEntry.Product2.Material_Code__c;
+			   existingRecordSet.add(key);
+                                                            
+              existingRecordMap.put(key,priceEntry);
+        }
+
+        Set<String> productCodeSet = new Set<String>();
+
+       
+        Map<String, PricebookEntry> existingMap = new Map<String, PricebookEntry>();
+        //query the data here!!!
+
+        List<PricebookEntry> newPriceBookEntries = new List<PricebookEntry>();
+         List<PricebookEntry> existingPriceBookEntries = new List<PricebookEntry>();
+
+        // for(Pricebook_lines__c lines : scope){
+            
+        //     String key = lines.LIST_HEADER_ID__c + '-'+ lines.ITEM_CODE__c;
+        //     if(lines.LIST_HEADER_ID__c != null && lines.ITEM_CODE__c!=null && !existingRecordSet.contains(key)){
+        //         String currencyCode = codeToCurrecyISOCode.get(lines.LIST_HEADER_ID__c);
+        //         newPriceBookEntries.add(new PricebookEntry(
+        //                 Pricebook2 = new Pricebook2(Price_Book_External_Id__c=lines.LIST_HEADER_ID__c),
+        //                 Product2 = new Product2(Material_Code__c=lines.ITEM_CODE__c),
+        //             	Start_Date__c = lines.START_DATE_ACTIVE__c,
+        //             	End_Date__c  = lines.END_DATE_ACTIVE__c,
+        //             	IsActive    = true,
+        //             	UnitPrice  = lines.UNIT_COST__c ,
+        //             	External_ID__c  = lines.LIST_LINE_ID__c, 
+        //                 CurrencyIsoCode  = codeToCurrecyISOCode.get(lines.LIST_HEADER_ID__c)
+        //         ));
+        //     }
+            
+        //     if(existingRecordSet.contains(key)){
+                
+        //         PricebookEntry entry = existingRecordMap.get(key);
+        //         entry.UnitPrice = lines.UNIT_COST__c;
+        //         entry.IsActive = true;
+        //         entry.Start_Date__c = lines.START_DATE_ACTIVE__c;
+        //         entry.End_Date__c = lines.END_DATE_ACTIVE__c;
+
+        //         existingPriceBookEntries.add(entry);
+        //     }
+        // } - Commenting here due to code incorrectness -- Update below - Nathan
+
+        for (Pricebook_lines__c lines : scope) {
+            String key = lines.LIST_HEADER_ID__c + '-' + lines.ITEM_CODE__c;
+
+            // Proceed only if both values are present
+            if (lines.LIST_HEADER_ID__c != null && lines.ITEM_CODE__c != null) {
+                String currencyCode = codeToCurrecyISOCode.get(lines.LIST_HEADER_ID__c);
+                
+                // If record doesn't exist already, prepare for insert
+                if (!existingRecordSet.contains(key)) {
+
+                    PricebookEntry pbe = new PricebookEntry(
+                        Pricebook2 = new Pricebook2(Price_Book_External_Id__c = lines.LIST_HEADER_ID__c),
+                        Product2 = new Product2(Material_Code__c = lines.ITEM_CODE__c),
+                        Start_Date__c = lines.START_DATE_ACTIVE__c,
+                        End_Date__c = lines.END_DATE_ACTIVE__c,
+                        IsActive = true,
+                        UnitPrice = lines.UNIT_COST__c,
+                        External_ID__c = lines.LIST_LINE_ID__c
+                    );
+
+                    // Set currency only if not null
+                    if (currencyCode != null) {
+                        pbe.CurrencyIsoCode = currencyCode;
+                    }
+
+                    newPriceBookEntries.add(pbe);
+                }
+                // Else, prepare for update
+                else {
+                    PricebookEntry entry = existingRecordMap.get(key);
+
+                    if (entry != null) {
+                        entry.UnitPrice = lines.UNIT_COST__c;
+                        entry.IsActive = true;
+                        entry.Start_Date__c = lines.START_DATE_ACTIVE__c;
+                        entry.End_Date__c = lines.END_DATE_ACTIVE__c;
+                        if (currencyCode != null) {
+                            // entry.CurrencyIsoCode = currencyCode;
+                        }
+                        existingPriceBookEntries.add(entry);
+                    }
+                }
+            }
+        }
+
+        system.debug('newPriceBookEntries>>' + newPriceBookEntries);
+        if(newPriceBookEntries.size()>0)
+            Database.upsert(newPriceBookEntries , PricebookEntry.External_Id__c, false);
+        
+        system.debug('existingPriceBookEntries>>' + existingPriceBookEntries);
+        if(existingPriceBookEntries.size()>0)
+            update existingPriceBookEntries;
+    }
+
+    public void finish(Database.BatchableContext bc) {
+        // Optional: trigger another batch or send summary email
+        // execute batch here
+    }
+}
