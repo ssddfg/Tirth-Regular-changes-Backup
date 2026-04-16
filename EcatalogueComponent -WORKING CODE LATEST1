@@ -1,0 +1,69 @@
+HTML
+
+<template>
+    <template if:true={isLoading}>
+        <lightning-spinner alternative-text="Loading eCatalogue..." size="medium"></lightning-spinner>
+    </template>
+
+    <template if:false={isLoading}>
+        <!-- Background image container -->
+        <div class="ecatalogue-container">
+            <!-- DMS / Dealer user → iframe -->
+            <template if:false={isInternalUser}>
+                <template if:true={url}>
+                    <iframe src={url} width="100%" height="800px" frameborder="0"></iframe>
+                </template>
+            </template>
+
+            <!-- Salesforce INTERNAL user → button → new tab -->
+            <template if:true={isInternalUser}>
+                <div class="slds-grid slds-grid_align-end slds-p-around_small">
+                    <lightning-button
+                        label="Open eCatalogue"
+                        variant="brand"
+                        onclick={handleOpenEcatalogue}>
+                    </lightning-button>
+                </div>
+            </template>
+        </div>
+    </template>
+
+    <template if:true={errorMessage}>
+        <div class="slds-text-color_error slds-p-around_medium">
+            {errorMessage}
+        </div>
+    </template>
+</template>
+
+
+
+
+JS
+
+import { LightningElement, track } from 'lwc';
+import getEcatalogueData from '@salesforce/apex/EcatalogueConfigController.getEcatalogueData';
+
+export default class EcatalogueComponent extends LightningElement {
+    @track url;
+    @track isInternalUser = false;
+    @track isLoading = true;
+    @track errorMessage;
+
+    connectedCallback() {
+        getEcatalogueData()
+            .then(res => {
+                this.url = res.url;
+                this.isInternalUser = res.isInternalUser;
+            })
+            .catch(err => {
+                this.errorMessage = err?.body?.message || 'Error';
+            })
+            .finally(() => {
+                this.isLoading = false;
+            });
+    }
+
+    handleOpenEcatalogue() {
+        window.open(this.url, '_blank');
+    }
+}
