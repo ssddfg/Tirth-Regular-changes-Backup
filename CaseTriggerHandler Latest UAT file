@@ -1,0 +1,554 @@
+public class CaseTriggerHandler extends TriggerHandler {
+    private List<Case> newRecords;
+    private List<Case> oldRecords;
+    private Map<Id, Case> newRecordsMap;
+    private Map<Id, Case> oldRecordsMap;
+
+    public CaseTriggerHandler() {
+        super('CaseTriggerHandler');
+        this.newRecords = (List<Case>) Trigger.new;
+        this.oldRecords = (List<Case>) Trigger.old;
+        this.newRecordsMap = (Map<Id, Case>) Trigger.newMap;
+        this.oldRecordsMap = (Map<Id, Case>) Trigger.oldMap;
+    }
+
+    public override void beforeInsert() {
+        System.debug('🚀 Trigger BEFORE INSERT fired');
+        setReportedByUser(newRecords);
+        assignTCRDateAndSequence(newRecords);
+        assignDetailsFromSerialNumber(newRecords);
+        CaseAssignmentRules.assignToServiceManager(newRecords); // adding here - Nathan - 24/07/25
+		setDateOfRetailFromAsset(newRecords);
+
+		setContactFromHerokuId(newRecords);
+
+       
+
+		
+    }
+
+	public override void beforeUpdate() 
+    {
+    	setDateOfRetailFromAsset(newRecords);
+		setContactFromHerokuId(newRecords);
+		
+		
+	}
+	
+
+    public override void afterInsert() {
+        System.debug('✅ Trigger AFTER INSERT fired');
+        assignCaseAssignmentRule(newRecords);
+        CaseAssignmentRules.shareCaseWithCreator(newRecords);
+
+        //TCR Number Search
+    	if(!isTCRSearchUpdated)
+        {
+        	isTCRSearchUpdated = true;
+        	updateTCRSearchField(newRecords);
+    	}
+    }
+
+	public override void afterUpdate() {
+         //TCR Number Search
+    if(!isTCRSearchUpdated){
+        isTCRSearchUpdated = true;
+        updateTCRSearchField(newRecords);
+    }
+	}
+
+    // 👤 Auto-set Reported By
+    private static void setReportedByUser(List<Case> caseList) {
+        for (Case c : caseList) {
+            if (c.Reported_By__c == null) {
+                c.Reported_By__c = UserInfo.getUserId();
+                System.debug('👤 Set Reported_By__c: ' + c.Reported_By__c);
+            }
+        }
+    }
+
+    // 🔁 Assign using Case Assignment Rule (for portal users)
+    private static void assignCaseAssignmentRule(List<Case> newList) {
+        User currentUser = [
+            SELECT Id, IsPortalEnabled
+            FROM User
+            WHERE Id = :UserInfo.getUserId()
+            LIMIT 1
+        ];
+
+        System.debug('🧑‍💻 IsPortalEnabled: ' + currentUser.IsPortalEnabled);
+
+        if (currentUser.IsPortalEnabled || Test.isRunningTest()) {
+            List<Case> listUpdateCase = new List<Case>();
+
+            for (Case caseRec : newList) {
+                if (caseRec.Id != null) {
+                    Case updateCase = new Case(Id = caseRec.Id);
+
+                    Database.DMLOptions dmlOpts = new Database.DMLOptions();
+                    dmlOpts.assignmentRuleHeader.useDefaultRule = true;
+
+                    updateCase.setOptions(dmlOpts);
+                    listUpdateCase.add(updateCase);
+
+                    System.debug('📤 Adding case for assignment rule update: ' + caseRec.Id);
+                }
+            }
+
+            if (!listUpdateCase.isEmpty()) {
+                Database.update(listUpdateCase);
+                System.debug('✅ Updated cases with assignment rule.');
+            }
+        }
+    }
+
+/*old Code
+    // 🧮 Assign TCR Date & Sequence Number
+   private static void assignTCRDateAndSequence(List<Case> caseList) {
+        Date today = Date.today();
+        Integer year = today.year();
+        Integer month = today.month();
+
+        System.debug('📅 TCR Date Context - Year: ' + year + ', Month: ' + month);
+
+        AggregateResult[] maxResults = [
+            SELECT MAX(TCR_Sequence__c) maxSeq
+            FROM Case
+           WHERE CALENDAR_YEAR(TCR_Date__c) = :year AND CALENDAR_MONTH(TCR_Date__c) = :month
+        ];
+        System.debug('🔢 maxResults   : ' + maxResults);
+
+        Integer sequence = 0;
+        if (!maxResults.isEmpty() && maxResults[0].get('maxSeq') != null) {
+            Decimal maxSeqDecimal = (Decimal) maxResults[0].get('maxSeq');
+            sequence = maxSeqDecimal.intValue(); // ✅ safely convert
+        }
+
+        if(sequence == 0) sequence = 1;
+        System.debug('🔢 Starting TCR sequence from: ' + sequence);
+
+        for (Case c : caseList) {
+            sequence++;
+            c.TCR_Date__c = today;
+            c.TCR_Sequence__c = sequence;
+            System.debug('🔐 Set TCR_Date__c: ' + today + ' | TCR_Sequence__c: ' + sequence);
+        }
+    }     OLD Code*/
+
+
+/*
+// 🧮 Assign TCR Date & GLOBAL Sequence Number (works with global-unique field)
+private static void assignTCRDateAndSequence(List<Case> caseList) {
+    Date today = Date.today();
+
+    Integer sequence = 0;
+
+    // 1) Global MAX (no month/year filter)
+    AggregateResult[] ar = [
+        SELECT MAX(TCR_Sequence__c) maxSeq
+        FROM Case
+    ];
+
+    if (!ar.isEmpty() && ar[0].get('maxSeq') != null) {
+        sequence = ((Decimal) ar[0].get('maxSeq')).intValue();
+
+        // 2) Lock the row that currently holds the MAX value (no ORDER BY with FOR UPDATE)
+        //    This serializes parallel transactions.
+        List<Case> lockRow = [
+            SELECT Id
+            FROM Case
+            WHERE TCR_Sequence__c = :sequence
+            LIMIT 1
+            FOR UPDATE
+        ];
+        // no-op: just to acquire lock
+    }
+
+    // NOTE: If you want to start from 2 when no records exist, set sequence = 1 here.
+    // if (sequence == 0) sequence = 1; // uncomment to start first new case at 2
+
+    System.debug('🔢 Global starting sequence: ' + sequence);
+
+    for (Case c : caseList) {
+        sequence = sequence + 1;     // single increment
+        c.TCR_Date__c = today;
+        c.TCR_Sequence__c = sequence;
+        System.debug('🔐 Set TCR_Date__c: ' + today + ' | TCR_Sequence__c: ' + sequence);
+    }
+}*/
+
+// 🧮 Assign TCR Date & GLOBAL Sequence Number (only for TCR record type)
+
+/*****************************OLD Code
+private static void assignTCRDateAndSequence(List<Case> caseList) {
+    Date today = Date.today();
+    Integer sequence = 0;
+
+    // 🔎 Get RecordType Id of TCR
+    Id tcrRtId = Schema.SObjectType.Case.getRecordTypeInfosByName().get('TCR').getRecordTypeId();
+    System.debug('🎯 TCR RecordTypeId: ' + tcrRtId);
+
+    // 1) Global MAX (only TCR cases)
+    AggregateResult[] ar = [
+        SELECT MAX(TCR_Sequence__c) maxSeq
+        FROM Case
+        WHERE RecordTypeId = :tcrRtId
+    ];
+    System.debug('📊 AggregateResult (MAX sequence): ' + ar);
+
+    if (!ar.isEmpty() && ar[0].get('maxSeq') != null) {
+        sequence = ((Decimal) ar[0].get('maxSeq')).intValue();
+        System.debug('🔢 Current MAX sequence found: ' + sequence);
+
+        // 2) Lock the row that currently holds the MAX value (only TCR cases)
+        List<Case> lockRow = [
+            SELECT Id, TCR_Sequence__c
+            FROM Case
+            WHERE RecordTypeId = :tcrRtId
+              AND TCR_Sequence__c = :sequence
+            LIMIT 1
+            FOR UPDATE
+        ];
+        System.debug('🔒 Locked row: ' + lockRow);
+    } else {
+        System.debug('⚠️ No existing TCR records found. Starting from sequence = 0');
+    }
+
+    // 3) Assign sequence ONLY for TCR cases
+    for (Case c : caseList) {
+        if (c.RecordTypeId == tcrRtId) {
+            sequence = sequence + 1;
+            c.TCR_Date__c = today;
+            c.TCR_Sequence__c = sequence;
+            System.debug('✅ Assigned -> CaseId: ' + c.Id 
+                       + ' | Date: ' + today 
+                       + ' | Sequence: ' + sequence);
+        } else {
+            System.debug('⏭️ Skipped (Helpdesk record): ' + c.Id);
+        }
+    }
+}
+
+**********************************/
+
+/*****************************New Code**********************************/
+private static void assignTCRDateAndSequence(List<Case> caseList) {
+    Date today = Date.today();
+    Integer sequence = 0;
+
+    // 🔎 Get RecordType Id of TCR
+    Id tcrRtId = Schema.SObjectType.Case.getRecordTypeInfosByName().get('TCR').getRecordTypeId();
+    System.debug('🎯 TCR RecordTypeId: ' + tcrRtId);
+
+    // 🗓️ STEP 1: Determine current Financial Year start date (April 1)
+    Integer currentYear = today.year();
+    Date fyStart;
+    if (today.month() < 4) {
+        // Before April → financial year started last year
+        fyStart = Date.newInstance(currentYear - 1, 4, 1);
+    } else {
+        // April or later → financial year started this year
+        fyStart = Date.newInstance(currentYear, 4, 1);
+    }
+    System.debug('📅 Current Financial Year Start: ' + fyStart);
+
+    // 1️⃣ Query MAX sequence only for current FY (and TCR record type)
+    AggregateResult[] ar = [
+        SELECT MAX(TCR_Sequence__c) maxSeq
+        FROM Case
+        WHERE RecordTypeId = :tcrRtId
+        AND TCR_Date__c >= :fyStart
+    ];
+    System.debug('📊 AggregateResult (MAX sequence for FY): ' + ar);
+
+    // 2️⃣ Use max value if found, else start fresh from 0
+    if (!ar.isEmpty() && ar[0].get('maxSeq') != null) {
+        sequence = ((Decimal) ar[0].get('maxSeq')).intValue();
+        System.debug('🔢 Current MAX sequence found in this FY: ' + sequence);
+
+        // 3️⃣ Lock the record that holds the current MAX sequence (only TCR cases in this FY)
+        List<Case> lockRow = [
+            SELECT Id, TCR_Sequence__c
+            FROM Case
+            WHERE RecordTypeId = :tcrRtId
+              AND TCR_Sequence__c = :sequence
+              AND TCR_Date__c >= :fyStart
+            LIMIT 1
+            FOR UPDATE
+        ];
+        System.debug('🔒 Locked row: ' + lockRow);
+    } else {
+        System.debug('⚠️ No TCR records found for current FY. Starting sequence = 0');
+    }
+
+    // 4️⃣ Assign new sequence numbers only for TCR cases
+    for (Case c : caseList) {
+        if (c.RecordTypeId == tcrRtId) {
+            sequence = sequence + 1;
+            c.TCR_Date__c = today;
+            c.TCR_Sequence__c = sequence;
+            System.debug('✅ Assigned -> CaseId: ' + c.Id 
+                       + ' | Date: ' + today 
+                       + ' | Sequence: ' + sequence);
+        } else {
+            System.debug('⏭️ Skipped (Helpdesk record): ' + c.Id);
+        }
+    }
+}
+
+
+
+/***************************************************************/
+
+  
+
+    // 🔍 Auto-populate fields from Serial Number (Asset + Equipment)
+    private static void assignDetailsFromSerialNumber(List<Case> caseList) {
+        Set<String> serialNumbers = new Set<String>();
+        for (Case c : caseList) {
+            if (String.isNotBlank(c.Machine_Serial_No__c)) {
+                serialNumbers.add(c.Machine_Serial_No__c.trim());
+            }
+        }
+
+        System.debug('🔍 Serial numbers collected: ' + serialNumbers);
+
+        Map<String, Asset> serialToAssetMap = new Map<String, Asset>();
+        Map<String, Equipment_Data__c> serialToEquipmentMap = new Map<String, Equipment_Data__c>();
+
+        if (!serialNumbers.isEmpty()) {
+            for (Asset a : [
+                SELECT Id, SerialNumber, Product2Id, Product2.Name , AccountId,
+                       Product2.Product_Model__c, Product2.Material_Code__c,
+                       Product2.RecordType.Name,Invoice__c
+                FROM Asset
+                WHERE SerialNumber IN :serialNumbers
+            ]) {
+                serialToAssetMap.put(a.SerialNumber, a);
+                System.debug('🔗 Asset found: ' + a.SerialNumber + ' → ' + a.Id);
+            }
+
+            List<Equipment_Data__c> equipmentList = [
+                SELECT Id, Material_Serial_Number__c,
+                       Invoice_Line_Item__r.Invoice__r.Order__r.OrderNumber,
+                       Invoice_Line_Item__r.Invoice__r.Invoice_ExternalID__c,
+                       Invoice_Line_Item__r.Invoice__c
+                FROM Equipment_Data__c
+                WHERE Material_Serial_Number__c IN :serialNumbers
+            ];
+
+            for (Equipment_Data__c ed : equipmentList) {
+                serialToEquipmentMap.put(ed.Material_Serial_Number__c, ed);
+                System.debug('🔗 Equipment found: ' + ed.Material_Serial_Number__c + ' → ' + ed.Id);
+            }
+        }
+
+        for (Case c : caseList) {
+            String sn = String.isNotBlank(c.Machine_Serial_No__c) ? c.Machine_Serial_No__c.trim() : null;
+
+            if (sn != null && serialToAssetMap.containsKey(sn)) {
+                Asset a = serialToAssetMap.get(sn);
+                Equipment_Data__c ed = serialToEquipmentMap.get(sn);
+
+                c.AssetId = a.Id;
+                c.Asset__c =a.Id;
+                c.Product__c = a.Product2.Name;
+				c.ProductId =a.Product2Id;
+				c.Invoice__c=a.Invoice__c;
+
+                System.debug('✅ Mapped AssetId: ' + a.Id + ', Product__c: ' + a.Product2Id + ', Invoice: ' + a.Invoice__c);
+
+                if (a.Product2Id != null) {
+                    String rtName = a.Product2.RecordType.Name;
+                    if (rtName == 'Material (Finished Product)') {
+                        c.Model__c = a.Product2.Product_Model__c;
+                    } else if (rtName == 'Spares') {
+                        c.Model__c = a.Product2.Material_Code__c;
+                    }
+                    System.debug('📦 Product RecordType: ' + rtName + ', Model__c: ' + c.Model__c);
+                }
+
+                if (c.AccountId == null) {
+                    
+                    System.debug('👥 Set AccountId: ' + a.AccountId);
+                }
+
+                if (ed != null) {
+                    if (ed.Invoice_Line_Item__r?.Invoice__r?.Order__r != null) {
+                        String orderNumberStr = ed.Invoice_Line_Item__r.Invoice__r.Order__r.OrderNumber;
+                        System.debug('🔎 Raw OrderNumber: ' + orderNumberStr);
+                        if (String.isNotBlank(orderNumberStr)) {
+                            try {
+                                //c.Order_No__c = Decimal.valueOf(orderNumberStr);
+
+								 c.Order_No__c = orderNumberStr;							
+
+                                System.debug('✅ Set Order_No__c: ' + c.Order_No__c);
+                            } catch (Exception ex) {
+                                System.debug('⚠️ Error parsing OrderNumber: ' + orderNumberStr);
+                            }
+                        }
+                    }
+
+                    if (ed.Invoice_Line_Item__r?.Invoice__r != null) {
+                        String extIdStr = ed.Invoice_Line_Item__r.Invoice__r.Invoice_ExternalID__c;
+                        System.debug('🔎 Raw Invoice External ID: ' + extIdStr);
+                        if (String.isNotBlank(extIdStr)) {
+                            try {
+                                c.Invoice_No__c = extIdStr;
+                                System.debug('✅ Set Invoice_No__c: ' + c.Invoice_No__c);
+                            } catch (Exception ex) {
+                                System.debug('⚠️ Could not parse Invoice_ExternalID__c: ' + extIdStr);
+                            }
+                        }
+                    }
+                }
+                System.debug('✅ Case Before Insertion: ' + c);
+            } else {
+                System.debug('❌ No matching Asset found for Serial Number: ' + sn);
+            }
+        }
+    }
+
+    
+    
+
+	/*
+        private static void setDateOfRetailFromAsset(List<Case> caseList) {
+    Set<Id> assetIds = new Set<Id>();
+
+    // Asset IDs collect karo
+    for (Case c : caseList) {
+        if (c.AssetId != null && String.isNotBlank(c.Machine_Serial_No__c)) {
+            assetIds.add(c.AssetId);
+        }
+    }
+
+    if (assetIds.isEmpty()) return;
+
+    // Asset SerialNumber  Delivery Date fetch
+    Map<Id, Asset> assetMap = new Map<Id, Asset>(
+        [SELECT Id, SerialNumber, Delivery_Date__c
+         FROM Asset
+         WHERE Id IN :assetIds]
+    );
+
+    
+    for (Case c : caseList) {
+        if (c.AssetId != null && assetMap.containsKey(c.AssetId)) {
+            Asset a = assetMap.get(c.AssetId);
+
+            /*if (String.isNotBlank(c.Machine_Serial_No__c) &&
+                c.Machine_Serial_No__c.trim() == a.SerialNumber) {
+                c.Date_of_Retail__c = a.Delivery_Date__c;
+            }
+
+			
+                c.Date_of_Retail__c = a.Delivery_Date__c;
+            
+        }
+    }
+}*/
+
+	/* TCR Date update Based on asset*/
+
+	private static void setDateOfRetailFromAsset(List<Case> caseList) {
+    Set<Id> assetIds = new Set<Id>();
+
+    // Asset IDs collect 
+    for (Case c : caseList) {
+        if (c.AssetId != null) {
+            assetIds.add(c.AssetId);
+        }
+    }
+
+    if (assetIds.isEmpty()) return;
+
+    // Asset  Delivery Date fetch 
+    Map<Id, Date> assetDateMap = new Map<Id, Date>();
+    for (Asset a : [
+        SELECT Id, Delivery_Date__c
+        FROM Asset
+        WHERE Id IN :assetIds
+    ]) {
+        assetDateMap.put(a.Id, a.Delivery_Date__c);
+    }
+
+    // Case date set when AssetId match 
+    for (Case c : caseList) {
+        if (c.AssetId != null && assetDateMap.containsKey(c.AssetId)) {
+            c.Date_of_Retail__c = assetDateMap.get(c.AssetId);
+        }
+    }
+}
+
+
+
+public static Boolean isTCRSearchUpdated = false;
+
+private static void updateTCRSearchField(List<Case> caseList){
+
+    List<Case> caseToUpdate = new List<Case>();
+    Id tcrRecordTypeId = '012HE000000q7K6YAI';
+
+    for(Case c : caseList){
+
+        if(c.RecordTypeId == tcrRecordTypeId){
+
+            if(String.isNotBlank(c.TCR_Number__c) &&
+               c.TCR_Number_Search__c != c.TCR_Number__c){
+
+                caseToUpdate.add(new Case(
+                    Id = c.Id,
+                    TCR_Number_Search__c = c.TCR_Number__c
+                ));
+            }
+        }
+    }
+
+    if(!caseToUpdate.isEmpty()){
+        update caseToUpdate;
+    }
+}
+
+
+// 🔗 Auto populate Contact from User_Id__c (Heroku ID)
+private static void setContactFromHerokuId(List<Case> caseList) {
+
+    Set<String> userIds = new Set<String>();
+
+    // Collect User_Id__c
+    for (Case c : caseList) {
+        if (String.isNotBlank(c.User_Id__c) && c.ContactId == null) {
+            userIds.add(c.User_Id__c.trim());
+        }
+    }
+
+    if (userIds.isEmpty()) return;
+
+    Map<String, Contact> contactMap = new Map<String, Contact>();
+
+    // Contact fetch using Heroku_Id__c
+    for (Contact con : [
+        SELECT Id, Heroku_Id__c
+        FROM Contact
+        WHERE Heroku_Id__c IN :userIds
+    ]) {
+        contactMap.put(con.Heroku_Id__c, con);
+    }
+
+    // Set Contact on Case
+    for (Case c : caseList) {
+        if (String.isNotBlank(c.User_Id__c) &&
+            contactMap.containsKey(c.User_Id__c.trim()) &&
+            c.ContactId == null) {
+
+            c.ContactId = contactMap.get(c.User_Id__c.trim()).Id;
+        }
+    }
+}
+
+
+
+	
+}
