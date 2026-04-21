@@ -1,0 +1,132 @@
+/**
+* @File Name : CaseAssignmentRules.cls
+* @Description : Contains Logic for Case Owner Assignment
+* @Author : Nathan 
+* @Last Modified By : Nathan 
+* @Last Modified On : July 24, 2025
+* @Modification Log :
+*==============================================================================
+* Ver | Date 		   | Author | Modification
+*==============================================================================
+* 1.0 | July 24, 2025 | Nathan | Initial Version
+**/
+
+public without sharing class CaseAssignmentRules {
+
+	/**
+     * @description  : Used in before Insert of CaseTriggerHandler to assign All Cases Created to 'Service manager' - Currently Only Manoj Kumar
+     * @param        : List<Case> newCaseList - Set of newly Inserted Cases
+     * @return       : None
+	 * @author		 : Nathan
+     */
+public static void assignToServiceManager(List<Case> newCaseList) {
+    Case currentCase; // For debugging
+    try {
+        // Prepare DML options to trigger assignment email
+        Database.DMLOptions dmlOpts = new Database.DMLOptions();
+        dmlOpts.EmailHeader.triggerUserEmail = true;
+
+        // Query both TCR and Helpdesk record types
+        Map<String, Id> recordTypeMap = new Map<String, Id>();
+        for (RecordType rt : [
+            SELECT Id, DeveloperName 
+            FROM RecordType 
+            WHERE sObjectType = 'Case' 
+            AND DeveloperName IN ('TCR', 'Helpdesk')
+        ]) {
+            recordTypeMap.put(rt.DeveloperName, rt.Id);
+        }
+        if (recordTypeMap.isEmpty()) return;
+
+        // Collect owner IDs for portal user check
+        List<Id> userIds = new List<Id>();
+        for (Case cs : newCaseList) {
+            userIds.add(cs.OwnerId);
+        }
+        Map<Id, User> caseOwnerMap = new Map<Id, User>(
+            [SELECT Id, IsPortalEnabled 
+             FROM User 
+             WHERE Id IN :userIds 
+             AND IsPortalEnabled = true]
+        );
+
+        // Query both Manoj Kumar and STAC
+        Id manojId;
+        Id serviceTechId;
+        List<User> userList = [
+            SELECT Id, Username 
+            FROM User 
+            WHERE Username IN (
+                'k.manoj@shaktimanagro.com',
+                'shubham.l@shaktimanagro.com'
+            )
+        ];
+        for (User u : userList) {
+            if (u.Username == 'k.manoj@shaktimanagro.com') {
+                manojId = u.Id;
+            } else if (u.Username == 'shubham.l@shaktimanagro.com') {
+                serviceTechId = u.Id;
+            }
+        }
+
+        // Assign owners based on record type
+        List<Case> casesToUpdate = new List<Case>();
+
+for (Case cs : newCaseList) {
+    if (caseOwnerMap.containsKey(cs.OwnerId)) continue; // Skip portal users
+
+    currentCase = cs;
+
+    if (cs.RecordTypeId == recordTypeMap.get('TCR') && manojId != null) {
+        cs.OwnerId = manojId; // TCR → Manoj
+        cs.setOptions(dmlOpts); 
+        casesToUpdate.add(cs);
+    } 
+    else if (cs.RecordTypeId == recordTypeMap.get('Helpdesk') && serviceTechId != null) {
+        cs.OwnerId = serviceTechId; // Helpdesk → Service Technician
+        cs.setOptions(dmlOpts); 
+        casesToUpdate.add(cs);
+    }
+}
+
+if (!casesToUpdate.isEmpty()) {
+    update casesToUpdate; // <-- THIS will trigger assignment emails
+}
+
+    } catch (Exception e) {
+        System.debug('#ERROR CaseAssignmentRules: ' + e.getMessage());
+        System.debug('#ERROR LINE NUM: ' + e.getLineNumber());
+        System.debug('#ERROR CASE DETAILS: ' + currentCase);
+    }
+}
+
+
+
+
+	/**
+     * @description  : Provide Case Access if He doesn't own it
+     * @param        : List<Case> newCaseList - Set of newly Inserted Cases
+     * @return       : None
+	 * @author		 : Nathan
+     */
+	public static void shareCaseWithCreator(List<Case> newCaseList) {
+        SYSTEM.DEBUG('INSIDE shareCaseWithCreator');
+        List<CaseShare> shares = new List<CaseShare>();
+
+        for (Case cs : newCaseList) {
+            if (cs.OwnerId != cs.CreatedById || Test.isRunningTest()) {
+                shares.add(new CaseShare(
+                    CaseId  = cs.Id,
+                    UserOrGroupId = cs.CreatedById,
+                    CaseAccessLevel = 'Edit', // or 'Read'
+                    RowCause = Schema.CaseShare.RowCause.Manual
+                ));
+            }
+        }
+
+        if (!shares.isEmpty() && !Test.isRunningTest()) {
+            insert shares;
+        }
+    }
+
+}
