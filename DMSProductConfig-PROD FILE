@@ -1,0 +1,2036 @@
+<!--
+  @description       : 
+  @author            : sanresh.mapsekar@appstrail.com
+  @group             : 
+  @last modified on  : 03-12-2025
+  @last modified by  : deval.vernekar@appstrail.com
+  @last modified on  : 03-17-2025
+  @last modified by  : Shashank.shekhar@appstrail.com
+
+-->
+<template>
+    <div class="slds-p-around_large container" style="margin-top: -50px;">
+        <div class="slds-col ">
+            <div class="slds-card slds-p-around_small">
+                <!-- Cart Icon -->
+                <div class="slds-text-align_right slds-m-bottom_small">
+
+                    <div class="header">
+                        <lightning-icon icon-name="utility:back" onclick={handleBack}></lightning-icon>
+                        <!-- <h1>All Products</h1> -->
+                        <h1>{headers}</h1>
+                        <!-- <lightning-icon icon-name="utility:cart" size="medium" alternative-text="Cart Icon"
+                            onclick={handleOpenCart}>
+                        </lightning-icon> -->
+                        <!-- <div class="cart-container">
+                            <lightning-icon icon-name="utility:cart" size="medium" alternative-text="Cart Icon"
+                                onclick={handleOpenCart}>
+                            </lightning-icon>
+                            <template if:true={selectedProductCount}>
+                                <span class="cart-badge">{selectedProductCount}</span>
+                            </template>
+                        </div> -->
+                        <div class="cart-container" onclick={handleOpenCart}>
+                            <div class="cart-icon-wrapper">
+                                <lightning-icon icon-name="utility:cart" size="medium"
+                                    alternative-text="Cart Icon"></lightning-icon>
+                                <template if:true={selectedProductCount}>
+                                    <div class="cart-badge">{selectedProductCount}</div>
+                                </template>
+                            </div>
+                        </div>
+
+
+                    </div>
+                    <template if:true={showSpinner}>
+                        <lightning-spinner alternative-text="Saving..." size="medium"></lightning-spinner>
+                    </template>
+                    <template if:true={showCart}>
+                        <section role="dialog" class="slds-modal slds-fade-in-open slds-modal_large">
+                            <div class="slds-modal__container">
+                                <!-- Modal Header -->
+                                <header class="slds-modal__header">
+                                    <button
+                                        class="slds-button slds-button_icon slds-modal__close slds-button_icon-inverse"
+                                        title="Close" onclick={handleCloseFilter}>
+                                        <lightning-icon icon-name="utility:close" size="small"></lightning-icon>
+                                    </button>
+                                    <h2 class="slds-text-heading_medium">Cart</h2>
+                                </header>
+
+                                <!-- Modal Body: Render Child Component -->
+                                 <div class="slds-modal__content slds-p-around_small">
+                                    <c-product-config-cart-portal     selected-products={selectedProducts}
+                                        onupdateproducts={handleUpdateProducts}
+                                        recordid={recordId} is-from-order={isFromOrder} from-customer={fromCustomer} account-id = {accountId} onclosecart={handleCloseFilter}></c-product-config-cart-portal>
+                                </div> 
+
+                                <!-- Modal Footer -->
+                                <!-- <footer class="slds-modal__footer">
+                                    <button class="cancel-button" onclick={handleCloseFilter}>Close</button>
+                                    <button class="Next-button" onclick={handleSaveButton}>Next</button>
+                                </footer> -->
+                            </div>
+                        </section>
+                        <div class="slds-backdrop slds-backdrop_open"></div>
+                    </template>
+                </div>
+                <div>
+                    <template if:true={showProductConfig}>
+                        <section role="dialog" class="slds-modal slds-fade-in-open slds-modal_medium">
+                            <div class="slds-modal__container">
+                                <!-- Modal Header -->
+                                <header class="slds-modal__header">
+                                    <button
+                                        class="slds-button slds-button_icon slds-modal__close slds-button_icon-inverse"
+                                        title="Close" onclick={handleCloseModal}>
+                                        <lightning-icon icon-name="utility:close" size="small"></lightning-icon>
+                                    </button>
+                                    <h2 class="slds-text-heading_medium">Filters</h2>
+                                </header>
+
+                                <!-- Modal Body: Render Child Component -->
+                                <div class="slds-modal__content slds-p-around_small">
+                                    <c-p-g-filter onendproducts={handleGetFilteredEndProducts} selected-group-id={selectedGroupId} solution-type-selected={solutionType} onitemselected={handleItemSelected} onresetproductview={handleResetView} pricebook-id={pricebookId}></c-p-g-filter>
+                                </div>
+
+                                <!-- Modal Footer -->
+                                <footer class="slds-modal__footer">
+                                    <button class="cancel-button" onclick={handleCloseModal}>Close</button>
+                                    <button class="filter-button" onclick={handleApplyFilter}>Apply Filter</button>
+                                </footer>
+                            </div>
+                        </section>
+                        <div class="slds-backdrop slds-backdrop_open"></div>
+                    </template>
+                </div>
+
+                <!-- add on Filters -->
+                <!-- <template if:true={openFilter}> -->
+                    <template if:false={hideOption}>
+                        <div class="maindiv">
+                            <div class="filters-container">
+                                <span class="filter-label">Filters:</span>
+                                <template for:each={filterOption} for:item="filter">
+                                    <lightning-combobox key={filter.apiName} label={filter.apiName} placeholder="Select"
+                                        options={filter.options} onchange={handleFilterChange}>
+                                    </lightning-combobox>
+                                </template>
+                            </div>
+
+                            <div class="button-container">
+                                <button class="slds-button slds-button_brand custom-button" onclick={resetFilters}>Reset
+                                    Filters</button>
+                                <button class="slds-button slds-button_brand custom-button" onclick={handleOpenModal}>Apply
+                                    Filters</button>
+                            </div>
+                        </div>
+
+
+
+                        <lightning-input type="search" label="Search Products" placeholder="Enter product name ..."
+                            value={searchDisplay} onchange={handleSearch} maxlength="50" message-when-too-short="Please enter at least 3 characters" message-when-too-long="Maximum 50 characters allowed" message-when-pattern-mismatch="Only letters, numbers, and spaces allowed" variant="label-hidden" style="margin-top: 6px;">
+                        </lightning-input>
+
+                    </template>
+
+                <!--for crop soln and application filter-->
+
+                <!-- <template if:true={showApplyButton}>
+                    <div class="maindiv">
+                        <div class="filters-container">
+                            <span class="filter-label">Filters:</span>
+                            <template for:each={filters} for:item="filter">
+                                <lightning-combobox key={filter.apiName} label={filter.apiName} placeholder="Select"
+                                    options={filter.options} onchange={handleFilterChange}>
+                                </lightning-combobox>
+                            </template>
+                        </div>
+
+                        <div class="button-container">
+                            <button class="slds-button slds-button_brand custom-button" onclick={resetFilters}>Reset
+                                Filters</button>
+                            <button class="slds-button slds-button_brand custom-button" onclick={handleOpenModal}>Apply
+                                Filters 1</button>
+                        </div>
+                    </div>
+
+
+
+                    <lightning-input type="search" label="Search Products" placeholder="Enter product name..."
+                        value={searchKey} onchange={handleSearch}>
+                    </lightning-input>
+
+                </template> -->
+
+                <template if:true={showApplyButton}>
+                    <div class="maindiv slds-grid slds-wrap slds-grid_align-spread">
+                        <!-- Filters on the Left -->
+                        <template if:true={filtersVisible}>
+                            <div class="slds-col slds-size_2-of-3 filters-container">
+                                <span class="filter-label">Filters:</span>
+                                <template for:each={filters} for:item="filter">
+                                    <lightning-combobox key={filter.apiName} label={filter.apiName} placeholder="Select"
+                                        options={filter.options} onchange={handleFilterChangeOnCropAppSol}>
+                                    </lightning-combobox>
+                                </template>
+                            </div>
+                        </template>
+
+                        <!-- Buttons on the Right -->
+                        <div class="slds-col slds-size_1-of-3 slds-text-align_right button-container">
+                            <button class="slds-button slds-button_brand custom-button" onclick={resetFilters}>Reset
+                                Filters</button>
+                            <button class="slds-button slds-button_brand custom-button" onclick={handleOpenModal}>Apply
+                                Filters</button>
+                        </div>
+                    </div>
+
+                    <!-- Search Bar Below -->
+                    <div class="slds-m-top_medium">
+                        <lightning-input type="search" label="Search Products" placeholder="Enter product name..."
+                            value={searchKey} onchange={handleSearch} maxlength="50" message-when-too-short="Please enter at least 3 characters" message-when-too-long="Maximum 50 characters allowed" message-when-pattern-mismatch="Only letters, numbers, and spaces allowed" variant="label-hidden">
+                        </lightning-input>
+                    </div>
+                </template>
+
+
+
+
+
+
+
+
+
+
+
+                <!-- </template> -->
+                <div class="slds-grid slds-wrap slds-scrollable_y">
+                <template if:true={loadProducts}>
+                    <div class="slds-align_absolute-center slds-size_1-of-1" style="height: 200px;">
+                        <lightning-spinner alternative-text="Loading..." size="medium"></lightning-spinner>
+                    </div>
+                </template>
+
+                <template if:false={loadProducts}>
+                    <template if:false={thisIsAllProd}>
+                        <template if:true={visibleProducts}>
+                            <template for:each={visibleProducts} for:item="product">
+                                <div key={product.Id} class="slds-col slds-size_1-of-5 slds-p-around_small">
+                                    <c-product-card imageurl={product.imageUrl} productid={product.id}
+                                        productname={product.Name} productcode={product.ProductCode} productmodel={product.productModel}
+                                        productfamily={product.Family} productdescription={product.Description}
+                                        selected={product.selected} child-products={product.childProducts}
+                                        onproductselect={handleProductSelection} is-disabled={isDisabled}
+                                        unselected={unselected} quantity={product.quantity}></c-product-card>
+                                </div>
+                            </template>
+                        </template>
+                        <template if:false={visibleProducts}>
+                            <div class="slds-align_absolute-center slds-text-heading_large slds-text-color_error slds-p-around_medium"
+                                style="font-weight: bold; min-height: 200px;">
+                                No products found.
+                            </div>
+                        </template>
+                    </template>
+                </template>    
+
+                <template if:true={isGroupsLoading}>
+                <div class="slds-align_absolute-center" style="height: 200px;">
+                    <lightning-spinner alternative-text="Loading groups..." size="medium"></lightning-spinner>
+                </div>
+            </template>
+
+
+                    <!-- For Product Gropu -->
+                    <template if:true={IsGrpCard}>
+                        <template if:true={thisIsAllProd}>
+                            <lightning-card>
+                                <template if:true={productGroups}>
+                                    <div class="slds-grid slds-wrap slds-p-around_medium custom-card-container">
+                                        <template for:each={productGroups} for:item="group">
+                                            <div key={group.Id} class="slds-col slds-size_1-of-3 slds-p-around_small">
+                                                <div class="custom-card" data-id={group.Id} data-name={group.Name} onclick={handleGroupClick}>
+                                                    <img src={group.imageUrl} alt={group.Name}
+                                                        class="custom-card-image" />
+                                                    <h3 class="custom-card-title">{group.Name}</h3>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </lightning-card>
+                        </template>
+                    </template>
+
+
+                    <template if:true={testVar}>
+                        <template for:each={endProducts} for:item="product">
+                            <div key={product.id} class="slds-col slds-size_1-of-5 slds-p-around_small">
+                                <c-product-card imageurl={product.imageUrl} productid={product.id}
+                                    productname={product.name} productcode={product.prodCode} productmodel={product.productModel}
+                                    productfamily={product.Family} productdescription={product.Description}
+                                    onproductselect={handleProductSelection} is-disabled={isDisabled}
+                                    unselected={unselected} quantity={product.quantity} selected={product.selected}></c-product-card>
+                            </div>
+                        </template>                       
+                    </template>
+
+                    <!-- <template if:false={endProducts}>
+                            <div class="slds-align_absolute-center slds-text-heading_large slds-text-color_error slds-p-around_medium"
+                                style="font-weight: bold; min-height: 200px;">
+                                No products found.
+                            </div>
+                        </template> -->
+                </div>
+
+<template if:true={showPagination}>
+                <div class="pagination-container">
+                    <button class="slds-button slds-button_neutral" onclick={handlePrev} disabled={isFirstPage}>
+                        Previous
+                    </button>
+                    <span class="slds-m-horizontal_medium">Page {currentPage} of {totalPages}</span>
+                    <button class="slds-button slds-button_brand" onclick={handleNext} disabled={isLastPage}>
+                        Next
+                    </button>
+                </div>
+</template>
+            </div>
+        </div>
+    </div>
+
+</template>
+
+
+
+/**************************************************************************/
+import { LightningElement, wire, track, api } from 'lwc';
+import getAllProductsByUserCurrency from '@salesforce/apex/ProductController.getAllProductsByUserCurrency';
+import { getPicklistValues, getObjectInfo } from "lightning/uiObjectInfoApi";
+import PRODUCT_OBJECT from '@salesforce/schema/Product2';
+//import PRODUCT_TYPE_FIELD from '@salesforce/schema/Product2.Product_Type__c';
+import { ShowToastEvent } from 'lightning/platformShowToastEvent';
+import createOpportunityLineItems from '@salesforce/apex/ProductConfig.createOpportunityLineItems';
+import getProductGroups from '@salesforce/apex/sparePartsController.getProductGroups';
+import getEndProducts from '@salesforce/apex/sparePartsController.getEndProducts';
+//import getFilterValues from '@salesforce/apex/TestingLeadConversion.getFilterValues';
+import getFilterValues from '@salesforce/apex/ProductConfig.getFilterValues';
+
+
+
+export default class DMSProductConfig extends LightningElement {
+    @track products = [];
+    @track visibleProducts = [];
+    @track currentPage = 1;
+    @track totalPages = 1;
+    @api recordId;
+    pageSize = 10;
+    isLoading = true;
+    productRecordTypeId;
+    picklistOptions;
+    searchKey = '';
+    searchDisplay='';
+    selectedOptions = [];
+    @track showChild = false;
+    @track IsGrpCard = true;
+    //@api pricebookEvent;
+    @api thisIsAllProd;
+    @track productGroups = [];
+    @track showGroupChlip = false;
+    @track endProducts = [];
+    @track selectedGroupId = null;
+    @api openCropSolution;
+    @api solutionType;
+    @api hideOption;
+    @api showApplyButton;
+    @track filtersVisible = false;
+    @api headers;
+    @api isFromOrder;
+    @api isDisabled = false;
+    @api showPagination;
+    @api fromCustomer;
+    @api accountId;
+    @track isSeriesSelectedInModal = false;
+    @track stagedFilteredProdIds = [];
+    @track isGroupsLoading = false;
+
+
+
+    @api pricebookId;  // Receiving pricebookId
+    connectedCallback() {
+        console.log('Received PricebookId in ProductConfig:', this.pricebookId);
+        console.log('Received fromCustomer:', this.fromCustomer);
+        console.log('Received customer accountId:', this.accountId);
+        console.log('Received OppId:', this.recordId);
+        console.log('Received hideOption:', this.hideOption);
+        console.log('openCropSolution State:', this.openCropSolution);
+        console.log('Received solutionType in dms:', this.solutionType);
+        console.log("Initial endProducts:", JSON.stringify(this.endProducts));
+        console.log("headers:", this.headers);
+        this.isDisabled = true;
+        this.fetchProducts();
+        this.loadFilters();
+        this.loadFiltersCropApp();
+
+    }
+
+
+
+
+    @wire(getProductGroups)
+    wiredGroups({ error, data }) {
+            this.isGroupsLoading = true; // This is missing
+
+        if (data) {
+            console.log('Raw Product Groups Data:', JSON.stringify(data));
+
+            if (!data || data.length === 0) {
+                this.productGroups = [];
+                console.log('No product groups found.');
+                return;
+            }
+
+            this.productGroups = data.map(group => ({
+                ...group,
+                imageUrl: this.extractImageUrl(group.Group_Image__c)
+            }));
+
+            console.log('Processed Product Groups:', JSON.stringify(this.productGroups));
+        } else if (error) {
+            console.error('Error fetching product groups:', error);
+        }
+            this.isGroupsLoading = false; // This is missing
+
+    }
+    @track openFilter = false;
+    allEndProducts = []; // Stores the original list
+    fetchedEndProducts = []; // Store the original unfiltered product list
+    @track testVar = false;
+
+
+    @track selectedGroupName='';
+    @track isProdGroupSelected=false;
+    handleGroupClick(event) {
+        this.selectedGroupId = event.currentTarget.dataset.id;
+        this.selectedGroupName = event.currentTarget.dataset.name;
+        this.showGroupChlip = true;
+        this.isProdGroupSelected = true;
+        this.IsGrpCard = false;
+        this.openFilter = true;
+        //this.hideOption = true;
+        this.visibleProducts = []; // product array is empty
+        this.thisIsAllProd = false;
+        this.endProducts = [];
+        this.hideOption = false;
+        console.log('Clicked Product Group ID:', this.selectedGroupId);
+
+        getEndProducts({ productGroupId: this.selectedGroupId, oppId: this.recordId })
+            .then(data => {
+                if (!data || data.length === 0) {
+                    console.log('No end products found dms.');
+                    this.testVar = false;
+                    this.endProducts = [];
+                    this.fetchedEndProducts = []; // Ensure original list is also empty
+
+                    return;
+                }
+                //  this.allEndProducts = data; // Store the result
+                //console.log('all Data:', JSON.stringify(data));
+                this.endProducts = data.map(product => ({
+
+                    id: product.Id,
+                    name: product.Name,
+                    subCategory: product.Sub_Category__c,
+                    productType: product.Product_Type__c,
+                    productModel: product.Product_Model__c,
+                    desc: product.Description,
+                    prodCode: product.ProductCode,
+                    baleShape: product.Bale_Shape__c,
+                    baleSize: product.Bale_Size__c,
+                    baleSizeMeasure: product.Bale_Size_Measure__c,
+                    quantity: product.Quantity__c ,
+                    hitchingCategory: product.Hitching_Category__c,
+                    workingWidth: product.Working_Width__c,
+                    bladeShape: product.Blade_Shape__c,
+                    ptoSpeedInput: product.PTO_Input_Speed__c,
+                    pickUpWidth: product.Pick_Up_Width__c,
+                    noOfKnotters: product.No_of_Knotters__c,
+                    gbMounting: product.GB_Mounting__c,
+                    x3PointHitchType: product.X3_Point_Hitch_Type__c,
+                    bladeType: product.Blade_Type__c,
+                    singleSpeedGearboxMultispeedGearbox: product.Single_Speed_Gearbox_Multispeed_Gearbox__c,
+                    transmissionType: product.Transmission_Type__c,
+                    tillingWidth: product.Tilling_Width__c,
+                    groundSpeedMechanismType: product.Ground_Speed_Mechanism_Type__c,
+                    enginePower: product.Engine_Power__c,
+                    engineMake: product.Engine_Make__c,
+                    emissionNorm: product.Emission_Norms__c,
+                    elevatorDischargeHeight: product.Elevator_Discharge_Height__c,
+                    numberOfRotors: product.Number_of_Rotors__c,
+                    //imageUrl: this.extractImageUrl(product.Product_Image__c),
+                    imageUrl: product.Product_Image__c 
+    ? this.extractImageUrl(product.Product_Image__c) 
+    : 'https://tirthagro--tirthuat.sandbox.file.force.com/servlet/rtaImage?eid=01tHE000004ks83&feoid=00NHy00000PH22P&refid=0EMHE000000RWVF',
+
+
+                }));
+                this.allEndProducts = this.endProducts;
+                this.fetchedEndProducts = [...this.endProducts];
+
+                console.log('Fetched End Products:', JSON.stringify(this.endProducts));
+                this.loadFilters();
+                this.loadFiltersCropApp();
+                this.testVar = true;
+                this.showPagination = true;
+              //  this.totalPages = Math.ceil(this.allEndProducts.length / this.pageSize);
+                this.totalPages = Math.ceil(this.allEndProducts.length / this.pageSize);
+                //this.totalPages = 1;
+                this.currentPage = 1;
+                this.paginateEndProducts();
+               // this.paginateProducts();
+                //this.endProducts = fetchedEndProducts.slice(0, this.pageSize); 
+            })
+            .catch(error => {
+                console.error('Error fetching end products:', error);
+            });
+    }
+
+    // paginateEndProducts() {
+    //     if (!this.allEndProducts || this.allEndProducts.length === 0) {
+    //         this.endProducts = [];
+    //         return;
+    //     }
+    //     const start = (this.currentPage - 1) * this.pageSize;
+    //     const end = start + this.pageSize;
+    //     this.endProducts = this.allEndProducts.slice(start, end);
+    // }
+
+    paginateEndProducts() {
+    if (!this.allEndProducts || this.allEndProducts.length === 0) {
+        this.endProducts = [];
+        return;
+    }
+    const start = (this.currentPage - 1) * this.pageSize;
+    const end = start + this.pageSize;
+
+    const paginatedSlice = this.allEndProducts.slice(start, end);
+
+    const selectedIds = new Set(this.selectedProducts.map(p => p.productId));
+    console.log('DEBUG: Paginating with selected IDs:', JSON.stringify(Array.from(selectedIds))); // <-- ADD THIS LINE
+
+    this.endProducts = paginatedSlice.map(product => ({
+        ...product,
+        selected: selectedIds.has(product.id)
+    }));
+}
+
+
+    handleShowChild() {
+        this.showChild = true;
+    }
+    handleHideChild() {
+        this.showChild = false;
+    }
+
+    @track showCart = false;
+    handleOpenCart() {
+        this.showCart = true;
+    }
+    handleCloseFilter() {
+        this.showCart = false;
+    }
+
+
+    @track showProductConfig = false;
+
+    handleOpenModal() {
+        this.showProductConfig = true;
+    }
+
+    handleCloseModal() {
+        this.showProductConfig = false;
+        this.isSeriesSelectedInModal = false;
+    }
+    @track testVar = false;
+    @track showEndProd = false;
+
+      
+
+    // handleApplyFilter() {
+    //     this.filtersVisible = true;
+    //     this.showProductConfig = false;
+    //     //this.isDisabled = false;
+    //     if(this.solutionType == 'allProducts'){
+    //       this.isDisabled = !this.selectedFilterValues.hpRange;
+    //     }
+    //     else{
+    //        this.isDisabled = !this.selectedFilterValues.productGroup;
+    //     }
+        
+    //     //this.selectedGroupId = true;
+
+    // }
+
+    //working down 12-7-25
+
+    //     handleApplyFilter() {
+    //     this.filtersVisible = true;
+    //     this.showProductConfig = false;
+    //     //this.isDisabled = false;
+
+    //     // if(this.solutionType == 'allProducts'){
+    //     //   this.isDisabled = !this.selectedFilterValues.hpRange;
+    //     // }
+    //     // else{
+    //     //    this.isDisabled = !this.selectedFilterValues.productGroup;
+    //     // }
+        
+    //     //this.selectedGroupId = true;
+    //         if (this.isSeriesSelectedInModal) {
+    //     this.isDisabled = false;
+    // }
+    
+    // // Reset the flag for the next time the modal is opened
+    // this.isSeriesSelectedInModal = false; 
+
+    // }
+
+    handleApplyFilter() {
+    this.showProductConfig = false;
+    this.filtersVisible = true;
+
+    if (this.stagedFilteredProdIds && this.stagedFilteredProdIds.length > 0) {
+        // Move staged IDs to the active filter property
+        this.filteredProdIds = [...this.stagedFilteredProdIds];
+
+        // Fetch the new product list
+        this.visibleProducts = [];
+        this.endProducts = [];
+        this.filterType = 'Filter';
+        this.currentPage = 1;
+        this.fetchProducts();
+
+        // Enable the product cards
+        this.isDisabled = false;
+    }
+    
+    // Reset for next use
+    this.isSeriesSelectedInModal = false;
+    this.stagedFilteredProdIds = [];
+}
+
+      handleResetView() {
+        this.isDisabled = true;
+        this.isSeriesSelectedInModal = false;
+
+    }
+
+    get isFirstPage() {
+        return this.currentPage === 1;
+    }
+
+    get isLastPage() {
+        return this.currentPage >= this.totalPages;
+    }
+    handleBack() {
+        const backEvent = new CustomEvent('back');
+        this.dispatchEvent(backEvent);
+        console.log('Back');
+    }
+
+    @track filterOptions = [
+        { label: 'Option 1', value: 'option1' },
+        { label: 'Option 2', value: 'option2' },
+        { label: 'Option 3', value: 'option3' }
+    ];
+
+
+    // @wire(getAllProducts)
+    // wiredProducts({ error, data }) {
+    //     if (data) {
+    //         console.log('MAIN DATA::'+JSON.stringify(data));
+    //         this.products = data.map(product => ({
+    //             ...product,
+    //             imageUrl: this.extractImageUrl(product.Product_Image__c),
+    //             childProducts: product.Products__r ? product.Products__r.map(child => ({
+    //             id: child.Id,
+    //             productName: child.Name,
+    //             selected : true,
+    //             parentId: product.Id
+    //         })) : [] // Ensure it's an array, even if no child products exist
+
+    //         }));
+    //         this.totalPages = Math.ceil(this.products.length / this.pageSize);  // Set total pages
+    //         this.isLoading = false;
+    //         this.updateVisibleProducts();
+    //     } else if (error) {
+    //         console.error('Error fetching products:', error);
+    //         this.isLoading = false;
+    //     }
+    // }
+
+    @track filterType='All';
+    fetchProducts() {
+        // if (!this.pricebookId) {
+        //     this.visibleProducts = false;
+        //     //console.error('PricebookId is missing!');
+        //     return;
+        // }
+       // getAllProducts({ pricebookId: this.pricebookId, oppId: this.recordId, prodIds: this.filteredProdIds,filterType:this.filterType })
+
+        getAllProductsByUserCurrency({prodIds: this.filteredProdIds,filterType:this.filterType })
+            .then(data => {
+                console.log('MAIN DATA Config::', JSON.stringify(data));
+                if (!data || data.length === 0) {
+                    this.visibleProducts = false;  // Hide products if no data is returned
+                    this.products = [];
+                    return;
+                }
+
+                this.products = data.map(product => ({
+                    ...product,
+                   // imageUrl: this.extractImageUrl(product.Product_Image__c),
+                   id: product.Id,
+                   name: product.Name,
+                   imageUrl: product.Product_Image__c 
+    ? this.extractImageUrl(product.Product_Image__c) 
+    : 'https://tirthagro--tirthuat.sandbox.file.force.com/servlet/rtaImage?eid=01tHE000004ks83&feoid=00NHy00000PH22P&refid=0EMHE000000RWVF',
+
+                    productModel: product.Product_Model__c,
+                    baleShape: product.Bale_Shape__c,
+                    baleSize: product.Bale_Size__c,
+                    baleSizeMeasure: product.Bale_Size_Measure__c,
+                    hitchingCategory: product.Hitching_Category__c,
+                    workingWidth: product.Working_Width__c,
+                    bladeShape: product.Blade_Shape__c,
+                    ptoSpeedInput: product.PTO_Input_Speed__c,
+                    pickUpWidth: product.Pick_Up_Width__c,
+                    noOfKnotters: product.No_of_Knotters__c,
+                    gbMounting: product.GB_Mounting__c,
+                    x3PointHitchType: product.X3_Point_Hitch_Type__c,
+                    bladeType: product.Blade_Type__c,
+                    singleSpeedGearboxMultispeedGearbox: product.Single_Speed_Gearbox_Multispeed_Gearbox__c,
+                    transmissionType: product.Transmission_Type__c,
+                    tillingWidth: product.Tilling_Width__c,
+                    groundSpeedMechanismType: product.Ground_Speed_Mechanism_Type__c,
+                    enginePower: product.Engine_Power__c,
+                    engineMake: product.Engine_Make__c,
+                    emissionNorm: product.Emission_Norms__c,
+                    elevatorDischargeHeight: product.Elevator_Discharge_Height__c,
+                    numberOfRotors: product.Number_of_Rotors__c,
+                    childProducts: product.Products__r
+                        ? product.Products__r.map(child => ({
+                            id: child.Id,
+                            productName: child.Name,
+                            selected: true,
+                            parentId: product.Id,
+                            quantity : child.Quantity__c,
+                            altBOM : child.Alternative_BOM__c,
+                            bomComponent : child.BOM_component__c,
+                            prodDes : child.Description
+                        }))
+                        : [] // Ensure it's an array, even if no child products exist
+                }));
+                this.totalPages = Math.ceil(this.products.length / this.pageSize);
+                this.isLoading = false;
+                console.log('Main Products::',JSON.stringify(this.products));
+                if (this.filteredProdIds && this.filteredProdIds.length > 0) {
+    this.finalVisibleProductList = [...this.products];
+    console.log('Final Visible Product List Snapshot:', JSON.stringify(this.finalVisibleProductList));
+}
+                this.updateVisibleProducts();
+            })
+            .catch(error => {
+                console.error('Error fetching products:', error);
+                this.isLoading = false;
+            }).finally(() => { 
+            this.loadProducts = false;
+        });
+
+    }
+
+
+    // handleSearch(event) {
+    //     this.searchKey = event.target.value.toLowerCase();
+    //     this.filterProducts();
+    // }
+
+    handleSearch(event) {
+    const input = event.target;
+    const searchValue = input.value.trim();
+    
+    if (searchValue.length > 50) {
+        input.setCustomValidity("Maximum 50 characters allowed");
+        input.reportValidity();
+        return;
+    }
+
+    if (searchValue.length > 0 && searchValue.length < 3) {
+        input.setCustomValidity("Please enter at least 3 characters");
+        input.reportValidity();
+        return;
+    }
+    
+    input.setCustomValidity("");
+    input.reportValidity();
+    
+    //this.searchKey = searchValue.toLowerCase();
+
+    this.searchDisplay = searchValue;
+    this.searchKey = searchValue.toLowerCase();
+    this.filterProducts();
+}
+
+    //capture product group id from filter
+//     handleItemSelected(event) {
+//     const selectedGroupId = event.detail.id;
+//     console.log('Selected GROUP ID:', selectedGroupId);
+//     this.loadFilters();
+// }
+
+lastValidGroupId = null;
+@track unselected = false
+
+// handleItemSelected(event) {
+//     const currentId = event.detail?.pgid;
+
+//     if (typeof currentId === 'string' && currentId.trim() !== '') {
+//         this.selectedGroupId = currentId;
+//         this.lastValidGroupId = currentId;
+//         console.log('Selected GROUP ID:', currentId);
+//         this.loadFilters();
+//         //this.isDisabled = false;
+//         this.isDisabled = !this.selectedFilterValues.hpRange;
+
+//         this.unselected = false;
+//         console.log('OUTPUT handleItemSelected: ', this.isDisabled);
+//     } else {
+//         console.warn('Invalid GROUP ID received:', currentId);
+//         console.log('Using last valid GROUP ID:', this.lastValidGroupId);
+//         // this.selectedGroupId = this.lastValidGroupId;
+//         //this.isDisabled = true;
+//         this.isDisabled = this.selectedFilterValues.hpRange;
+//         this.unselected = false;
+//         // Optionally: you can choose NOT to call loadFilters() here
+//     }
+// }
+
+handleItemSelected(event) {
+    const currentId = event.detail?.pgid;
+
+    if (typeof currentId === 'string' && currentId.trim() !== '') {
+        this.selectedGroupId = currentId;
+        this.lastValidGroupId = currentId;
+        console.log('Selected GROUP ID:', currentId);
+        this.loadFilters();
+        //this.isDisabled = false;
+       // this.isDisabled = !this.selectedFilterValues.hpRange;;
+        this.unselected = false;
+        console.log('OUTPUT handleItemSelected: ', this.isDisabled);
+    } else {
+        console.warn('Invalid GROUP ID received:', currentId);
+        console.log('Using last valid GROUP ID:', this.lastValidGroupId);
+       // this.selectedGroupId = this.lastValidGroupId;
+       //this.isDisabled = true;
+       // this.isDisabled = this.selectedFilterValues.hpRange;;
+        this.unselected = false
+        // Optionally: you can choose NOT to call loadFilters() here
+    }
+}
+
+
+
+    // filterProducts() {
+    //     const filteredProducts = this.products.filter(product =>
+    //         product.Name?.toLowerCase().includes(this.searchKey)
+    //     );
+    //     this.totalPages = Math.ceil(filteredProducts.length / this.pageSize);
+    //     this.currentPage = 1;  
+    //     this.visibleProducts = filteredProducts.slice(0, this.pageSize);
+    // }
+
+filterProducts() {
+    console.log('filterProducts called');
+    console.log('Current solutionType:', this.solutionType);
+    console.log('Search Key:', this.searchKey);
+
+    if (!this.originalEndProducts) {
+        this.originalEndProducts = [...this.endProducts]; // Store original data
+    }
+
+    if (this.searchKey.trim() === '') {
+        console.log('Search cleared, restoring original product list.');
+        this.endProducts = [...this.originalEndProducts]; // Restore original list
+        this.totalPages = Math.ceil(this.endProducts.length / this.pageSize);
+        this.currentPage = 1;
+        this.endProducts = this.endProducts.slice(0, this.pageSize);
+        return;
+    }
+
+    if (this.solutionType === 'allProducts') {
+        // console.log('Filtering from original list of', this.originalEndProducts.length, 'products.');
+
+        // const filteredProducts = this.originalEndProducts.filter(product =>
+        //     // Check if searchKey is in the name OR the prodCode
+        //     product.name?.toLowerCase().includes(this.searchKey) ||
+        //     product.prodCode?.toLowerCase().includes(this.searchKey)
+        // );
+
+        // console.log('Filtered Products (before slicing):', JSON.stringify(filteredProducts));
+
+        // this.totalPages = Math.ceil(filteredProducts.length / this.pageSize);
+        // this.currentPage = 1;
+        // this.endProducts = filteredProducts.slice(0, this.pageSize);
+
+        // console.log('Visible Products (after slicing):', JSON.stringify(this.endProducts));
+
+                        let filteredList;
+
+        // HIGHLIGHT: The logic now correctly handles both filtering and clearing the search.
+        if (this.searchKey && this.searchKey.length >= 3) {
+            // HIGHLIGHT: The filter now correctly uses `this.fetchedEndProducts` (the complete list).
+            filteredList = this.fetchedEndProducts.filter(product =>
+                (product.name?.toLowerCase().includes(this.searchKey) ||
+                (product.prodCode?.toLowerCase().includes(this.searchKey)))
+            );
+        } else {
+            // HIGHLIGHT: When search is cleared, it reverts to the full list.
+            filteredList = [...this.fetchedEndProducts];
+        }
+
+        // HIGHLIGHT: The source for pagination is now the newly filtered list.
+        this.allEndProducts = filteredList;
+
+        // HIGHLIGHT: Pagination is reset to show the results from the first page.
+        this.totalPages = Math.ceil(this.allEndProducts.length / this.pageSize);
+        this.currentPage = 1;
+
+        // HIGHLIGHT: Call the pagination function to update the UI correctly for all pages.
+        this.paginateEndProducts();
+
+
+    } else {
+        // Updated the else block as well for consistency
+        const filteredProducts = this.products.filter(product =>
+            product.Name?.toLowerCase().includes(this.searchKey) ||
+            product.prodCode?.toLowerCase().includes(this.searchKey)
+        );
+        this.totalPages = Math.ceil(filteredProducts.length / this.pageSize);
+        this.currentPage = 1;
+        this.visibleProducts = filteredProducts.slice(0, this.pageSize);
+    }
+}
+
+
+
+    // resetFilter(){
+    //     return this.visibleProducts = visibleProducts.slice(0, this.pageSize);
+    // }
+
+    resetFilters() {
+        this.selectedFilters = {}; // Clear applied filters
+
+        // Reset selected values in filters
+        this.filters = this.filters.map(filter => ({
+            ...filter,
+            selectedValue: '' // Reset filter selection
+        }));
+
+        console.log('Original allEndProducts::', JSON.stringify(this.allEndProducts));
+        // Restore the original product list
+        this.endProducts = [...this.allEndProducts];
+        this.visibleProducts = [... this.finalVisibleProductList];
+        this.showToast('Filter Reset', 'Filters have been cleared. Displaying all available products.', 'info');
+        console.log('Filters reset. Restoring original product list.');
+    }
+
+
+    extractImageUrl(richText) {
+        if (!richText) return null;
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = richText;
+        const imgTag = tempDiv.querySelector('img');
+        return imgTag ? imgTag.src : null;
+    }
+
+    @wire(getObjectInfo, { objectApiName: PRODUCT_OBJECT })
+    wiredObjectInfo({ error, data }) {
+        if (data) {
+            this.productRecordTypeId = data.defaultRecordTypeId;
+        } else if (error) {
+            console.error('Error fetching object info:', error);
+        }
+    }
+
+    // @wire(getPicklistValues, { recordTypeId: '$productRecordTypeId', fieldApiName: PRODUCT_TYPE_FIELD })
+    // wiredPicklist({ error, data }) {
+    //     if (data) {
+    //         this.picklistOptions = data.values.map(entry => ({ label: entry.label, value: entry.value }));
+    //     } else if (error) {
+    //         console.error('Error fetching picklist values:', error);
+    //     }
+    // }
+
+    updateVisibleProducts() {
+        const start = (this.currentPage - 1) * this.pageSize;
+        const end = start + this.pageSize;
+
+        if (this.solutionType === 'allProducts') {
+        // Corrected logic: Slice the array for the current page first.
+        // Then, map over that paginated slice to add the 'selected' property.
+        this.endProducts = this.products.slice(start, end).map(product => {
+            // Check if this product is in the master selectedProducts list
+            const matchingProduct = this.selectedProducts.find(prod => prod.productId === product.Id);
+
+            // Return the product with its correct 'selected' status
+            return {
+                ...product,
+                selected: !!matchingProduct // Use !! to ensure a true/false boolean value
+            };
+        });
+        console.log('Visible End Products ::', JSON.stringify(this.endProducts));
+
+    } 
+    //     if (this.solutionType === 'allProducts') {
+    //         this.endProducts = this.products.slice(start, end);
+    //         this.endProducts = this.products.slice(start, end).map(product => {
+    //             // Check if the product is in selectedProducts
+    //             const matchingProduct = this.selectedProducts.find(prod => prod.productId === product.Id);
+
+    //             return {
+    //                 ...product,
+    //                 selected: matchingProduct ? true : false // Set isSelected to true if found
+    //             };
+    //         });
+
+    //         this.endProducts = this.products.map(product => ({
+
+    //                 id: product.Id,
+    //                 name: product.Name,
+    //                 subCategory: product.Sub_Category__c,
+    //                 productType: product.Product_Type__c,
+    //                 desc: product.Description,
+    //                 prodCode: product.ProductCode,
+    //                 baleShape: product.Bale_Shape__c,
+    //                 baleSize: product.Bale_Size__c,
+    //                 baleSizeMeasure: product.Bale_Size_Measure__c,
+    //                 hitchingCategory: product.Hitching_Category__c,
+    //                 workingWidth: product.Working_Width__c,
+    //                 bladeShape: product.Blade_Shape__c,
+    //                 ptoSpeedInput: product.PTO_Input_Speed__c,
+    //                 pickUpWidth: product.Pick_Up_Width__c,
+    //                 noOfKnotters: product.No_of_Knotters__c,
+    //                 gbMounting: product.GB_Mounting__c,
+    //                 x3PointHitchType: product.X3_Point_Hitch_Type__c,
+    //                 bladeType: product.Blade_Type__c,
+    //                 singleSpeedGearboxMultispeedGearbox: product.Single_Speed_Gearbox_Multispeed_Gearbox__c,
+    //                 transmissionType: product.Transmission_Type__c,
+    //                 tillingWidth: product.Tilling_Width__c,
+    //                 groundSpeedMechanismType: product.Ground_Speed_Mechanism_Type__c,
+    //                 enginePower: product.Engine_Power__c,
+    //                 engineMake: product.Engine_Make__c,
+    //                 emissionNorm: product.Emission_Norms__c,
+    //                 elevatorDischargeHeight: product.Elevator_Discharge_Height__c,
+    //                 numberOfRotors: product.Number_of_Rotors__c,
+    //                 //imageUrl: this.extractImageUrl(product.Product_Image__c),
+    //                 imageUrl: product.Product_Image__c 
+    // ? this.extractImageUrl(product.Product_Image__c) 
+    // : 'https://tirthagro--tirthuat.sandbox.file.force.com/servlet/rtaImage?eid=01tHE000004ks83&feoid=00NHy00000PH22P&refid=0EMHE000000RWVF',
+
+
+    //             }));
+    //         console.log('Visible End Products ::', JSON.stringify(this.endProducts));
+    //     }
+         else {
+            this.visibleProducts = this.products.slice(start, end);
+            this.visibleProducts = this.products.slice(start, end).map(product => {
+                // Check if the product is in selectedProducts
+                const matchingProduct = this.selectedProducts.find(prod => prod.productId === product.Id);
+
+                return {
+                    ...product,
+                    selected: matchingProduct ? true : false // Set isSelected to true if found
+                };
+            });
+            console.log('Visible Products ::', JSON.stringify(this.visibleProducts));
+        }
+
+    }
+
+    // handleNext() {
+    //     if (this.currentPage < this.totalPages) {
+    //         this.currentPage++;
+    //         this.updateVisibleProducts();
+    //     }
+    // }
+
+    // handlePrev() {
+    //     if (this.currentPage > 1) {
+    //         this.currentPage--;
+    //         this.updateVisibleProducts();
+    //     }
+    // }
+
+    handleNext() {
+    if (this.currentPage < this.totalPages) {
+        this.currentPage++;
+        // Use the correct pagination function for the current context
+        if (this.isProdGroupSelected) {
+            this.paginateEndProducts();
+        } else {
+            this.updateVisibleProducts();
+        }
+    }
+}
+
+handlePrev() {
+    if (this.currentPage > 1) {
+        this.currentPage--;
+        // Use the correct pagination function for the current context
+        if (this.isProdGroupSelected) {
+            this.paginateEndProducts();
+        } else {
+            this.updateVisibleProducts();
+        }
+    }
+}
+
+
+    handleChange(event) {
+        this.selectedValue = event.detail.value;
+    }
+
+    handleCloseFilter() {
+    this.showCart = false;
+}
+
+
+    // handleSaveButton() {
+    //     // Show success message
+    //     this.dispatchEvent(
+    //         new ShowToastEvent({
+    //             title: 'Success',
+    //             message: 'Your items have been added to the cart. Ready to checkout!',
+    //             variant: 'success'
+    //         })
+    //     );
+    //     this.showProductConfig = false;
+    // }
+
+
+
+    @api selectedProducts = [];
+
+
+
+
+//     handleProductSelection(event) {
+//     const { productCode, selected } = event.detail;
+
+//     if (!productCode) {
+//         console.error('Product code is missing from the selection event.');
+//         return;
+//     }
+
+//     let productInMasterList;
+//     let receivedProductId;
+
+//     // Check which flow is active to search the correct master product list.
+//     if (this.isProdGroupSelected) {
+//         // --- "All Products" Flow ---
+//         // Search the master list for the "All Products" flow.
+//         productInMasterList = this.allEndProducts.find(p => p.prodCode === productCode);
+//         if (productInMasterList) {
+//             receivedProductId = productInMasterList.id; // Get the lowercase 'id'
+//         }
+//     } else {
+//         // --- Other Solution Flows ---
+//         // Search the master list for other flows.
+//         productInMasterList = this.products.find(p => p.ProductCode === productCode);
+//         if (productInMasterList) {
+//             receivedProductId = productInMasterList.Id; // Get the uppercase 'Id'
+//         }
+//     }
+
+//     if (!productInMasterList) {
+//         console.error('Could not find the selected product in the master list for the current flow.');
+//         return;
+//     }
+
+//     // Now, proceed with the selection logic using the correctly found ID.
+//     if (selected) {
+//         if (!this.selectedProducts.some(p => p.productId === receivedProductId)) {
+//             this.selectedProducts = [...this.selectedProducts, {
+//                 ...event.detail,
+//                 ...this.selectedFilterValues,
+//                 productId: receivedProductId
+//             }];
+//         }
+//     } else {
+//         this.selectedProducts = this.selectedProducts.filter(product => product.productId !== receivedProductId);
+//     }
+
+//     // Force a re-render using the correct pagination function for the current flow.
+//     if (this.isProdGroupSelected) {
+//         this.paginateEndProducts();
+//     } else {
+//         this.updateVisibleProducts();
+//     }
+// }
+
+// handleProductSelection(event) {
+//     // 1. Get the unique productId directly from the event.
+//     const { productId, selected } = event.detail;
+
+//     // 2. Validate that the unique ID was passed from the product card.
+//     if (!productId) {
+//         console.error('Product ID is missing from the selection event. This is required.');
+//         return;
+//     }
+
+//     // 3. Update the master selection list. This logic is now the same for both flows.
+//     if (selected) {
+//         // Add the product if it's not already in the list.
+//         if (!this.selectedProducts.some(p => p.productId === productId)) {
+//             this.selectedProducts = [...this.selectedProducts, {
+//                 ...event.detail,
+//                 ...this.selectedFilterValues,
+//                 productId: productId // Ensure the unique ID is stored
+//             }];
+//         }
+//     } else {
+//         // Remove the product if it's been de-selected.
+//         this.selectedProducts = this.selectedProducts.filter(product => product.productId !== productId);
+//     }
+
+//     // 4. Call the correct UI refresh function based on the current view.
+//     if (this.isProdGroupSelected) {
+//         this.paginateEndProducts();
+//     } else {
+//         this.updateVisibleProducts();
+//     }
+// }
+
+handleProductSelection(event) {
+    const { productId, selected } = event.detail;
+    if (!productId) {
+        console.error('Product ID is missing from the selection event.');
+        return;
+    }
+
+    // --- Part 1: Find the full product data from the component's current state ---
+
+    // Determine which list is currently visible on screen
+    const visibleList = this.isProdGroupSelected ? this.endProducts : this.visibleProducts;
+    
+    // Find the complete product object from that list using the ID from the event
+    const fullProduct = visibleList.find(p => p.id === productId || p.Id === productId);
+
+    if (!fullProduct) {
+        console.error('Could not find the selected product in the visible list.');
+        return;
+    }
+
+
+    // --- Part 2: Update the master `selectedProducts` list for the cart ---
+
+    if (selected) {
+        if (!this.selectedProducts.some(p => p.productId === productId)) {
+            
+            // Create the new object for the cart using our complete 'fullProduct' object
+            const newSelectedProduct = {
+                // Base details can come from the event
+                ...event.detail,
+
+                // ✅ FINAL FIX: Get the BOM data from the full product object, not the event
+                bomList: fullProduct.childProducts || [], 
+
+                // Add filter values and ensure productId is set
+                ...this.selectedFilterValues,
+                productId: fullProduct.id || fullProduct.Id
+            };
+            
+            // Add the clean, normalized product to the master list
+            this.selectedProducts = [...this.selectedProducts, newSelectedProduct];
+        }
+    } else {
+        // This part for de-selection is correct
+        this.selectedProducts = this.selectedProducts.filter(p => p.productId !== productId);
+    }
+
+
+    // --- Part 3: Update the UI to show the checkmark (this logic is correct) ---
+
+    fullProduct.selected = selected; // Update the object in the visible list
+
+    // Trigger a refresh of the visible list
+    if (this.isProdGroupSelected) {
+        this.endProducts = [...this.endProducts];
+    } else {
+        this.visibleProducts = [...this.visibleProducts];
+    }
+}
+
+
+    get selectedProductCount() {
+        console.log("Selected Product Count:", this.selectedProducts.length);
+        return this.selectedProducts.length > 0 ? this.selectedProducts.length : null;
+    }
+
+    @track finalProducts = [];
+    // handleUpdateProducts(event) {
+    //     this.finalProducts = event.detail; // Get updated products from child
+    //     console.log('Updated selectedProducts in parent: ', JSON.stringify(this.finalProducts));
+
+    // }
+
+    handleUpdateProducts(event) {
+    // Merge received updates with existing selectedProducts to preserve all fields
+    const updatedProducts = event.detail;
+    
+    this.selectedProducts = this.selectedProducts.map(existingProduct => {
+        const updatedProduct = updatedProducts.find(p => p.productId === existingProduct.productId);
+        return updatedProduct ? { ...existingProduct, ...updatedProduct } : existingProduct;
+    });
+    
+    this.finalProducts = [...this.selectedProducts]; // Keep your existing final copy
+    console.log('Merged products with retained data:', JSON.stringify(this.selectedProducts));
+}
+
+    // handleSaveButton() {
+    //     if (!this.selectedProducts.length) {
+    //         this.showToast('Error', 'No products selected.', 'error');
+    //         return;
+    //     }
+
+    //     createOpportunityLineItems({ 
+    //         opportunityId: '006H100000HTkHhIAL', //this.opportunityId
+    //         selectedProducts: this.finalProducts
+    //     })
+    //     .then(() => {
+    //         this.showToast('Success', 'Opportunity Line Items created successfully!', 'success');
+    //     })
+    //     .catch(error => {
+    //         this.showToast('Error', error.body.message, 'error');
+    //     });
+    // }
+    @track showSpinner = false;
+
+    handleSaveButton() {
+        // console.log('OPP Id::'+JSON.stringify(this.recordId));
+        console.log('OPP Prod List1111::' + JSON.stringify(this.finalProducts));
+        if (!this.finalProducts || this.finalProducts.length === 0) {
+            console.error('No products selected');
+            this.showToast('Error', 'Please select and fill data before creating Opportunity Line Item', 'error');
+            return;
+        }
+
+        console.log('Final Products:', JSON.stringify(this.finalProducts));
+        console.log('current oppId:', this.recordId);
+
+        createOpportunityLineItems({
+            opportunityId: this.recordId,
+            finalProductListJson: JSON.stringify(this.finalProducts)
+        }).then(() => {
+            this.showToast('Success', 'Opportunity Line Items created successfully', 'success');
+            this.handleCloseFilter(); // Close modal on success
+            this.showSpinner = true;
+            this.isProdGroupSelected=false;
+            window.location.reload()
+
+
+        }).catch(error => {
+            console.error('Error creating Opportunity Line Items:', error);
+            let errorMessage = 'An unexpected error occurred.';
+            // Simplified logic that relies on the Apex error message
+            if (error.body && error.body.message) {
+                errorMessage = error.body.message;
+            }
+            this.showToast('Error', errorMessage, 'error');
+        })
+        .finally(() => {
+            this.showSpinner = false;
+        });
+
+
+    }
+
+handleSaveNext() {
+
+         this.showOpportunityForm = true; 
+   
+}
+
+    showToast(title, message, variant) {
+        this.dispatchEvent(new ShowToastEvent({
+            title,
+            message,
+            variant
+        }));
+    }
+
+
+    //dyanmic product group filter 
+    @track filters = [];
+    @track filterOption = [];
+
+    //selectedGroupId = 'a1FH1000003ohZJMAY'; // Hardcoded for now
+
+
+
+    loadFilters() {
+    getFilterValues({ productGroupId: this.lastValidGroupId })
+        .then(result => {
+            this.filters = Object.keys(result).map(apiName => ({
+                apiName: this.formatLabel(apiName),
+                options: [
+                    { label: '--None--', value: '' }, // Add None option first
+                    ...result[apiName].map(value => ({ label: value, value: value }))
+                ],
+                selectedValue: ''
+            }));
+        })
+        .catch(error => {
+            console.error('Error fetching filters:', error);
+        });
+}
+
+            loadFiltersCropApp() {
+    getFilterValues({ productGroupId: this.selectedGroupId })
+        .then(result => {
+            this.filterOption = Object.keys(result).map(apiName => ({
+                apiName: this.formatLabel(apiName),
+                options: [
+                    { label: '-- None --', value: '' }, // Add None option first
+                    ...result[apiName].map(value => ({ 
+                        label: value, 
+                        value: value 
+                    }))
+                ],
+                selectedValue: ''
+            }));
+        })
+        .catch(error => {
+            console.error('Error fetching filters:', error);
+            this.showToast('Error', 'Failed to load filters', 'error');
+        });
+}
+
+    formatLabel(apiName) {
+        return apiName
+            .replace(/__c$/, "")  // Remove trailing '__c'
+            .replace(/__/g, "")   // Remove any remaining double underscores
+            .replace(/_/g, " ")   // Replace underscores with spaces
+            .replace(/\b\w/g, c => c.toUpperCase()); // Capitalize each word
+    }
+
+
+
+
+
+    // handleFilterChange(event) {
+    //     console.log('Filter Changed:');
+    //     const apiName = event.target.label;
+    //     console.log('Filter apiName:'+apiName);
+    //     const selectedValue = event.detail.value;
+    //     console.log('Filter selectedValue:'+selectedValue);
+
+    //     this.filters = this.filters.map(filter =>
+    //         filter.apiName === apiName ? { ...filter, selectedValue } : filter
+    //     );
+    // }
+
+    allEndProducts = []; // Original product list
+    @track selectedFilters = {}; // Holds applied filters
+
+    lastNonEmptyFilteredProducts = [...this.endProducts]; // Store last successful filtered products
+
+
+    //     handleFilterChange(event) {
+    //         const fieldName = event.target.label; // Fix: Read the dataset attribute
+    //         const selectedValue = event.detail.value; // Get the selected filter value
+
+    //         console.log(`Filter changed: ${fieldName} -> ${selectedValue}`);
+
+    //         // Store or remove filter values
+    //         if (selectedValue) {
+    //             this.selectedFilters[fieldName] = selectedValue;
+    //         } else {
+    //             delete this.selectedFilters[fieldName];
+    //         }
+
+    //         console.log('Updated selectedFilters:', JSON.stringify(this.selectedFilters));
+
+    //         // Apply the filters
+    //         this.applyFilters();
+    //     }
+
+
+    //     applyFilters() {
+    //         if (!this.endProducts.length) {
+    //             console.warn('No products available to filter.');
+    //             return;
+    //         }
+
+    //         console.log('Applying filters:', JSON.stringify(this.selectedFilters));
+
+    //     //     this.endProducts = this.endProducts.filter(product => {
+    //     //                 return Object.keys(this.selectedFilters).every(filterKey => {
+    //     //         const productKey = this.mapFilterKeyToProductKey(filterKey); // Convert filterKey to productKey
+    //     //         const productValue = product[productKey]; 
+    //     //         const filterValue = this.selectedFilters[filterKey];
+
+    //     //         console.log(`Checking product ${product.name}: ${productKey} = ${productValue}, filter = ${filterValue}`);
+
+    //     //         return productValue && productValue === filterValue;
+    //     //     });
+    //     // });
+
+    //     let filteredProducts = this.endProducts.filter(product => {
+    //         return Object.keys(this.selectedFilters).every(filterKey => {
+    //             const productKey = this.mapFilterKeyToProductKey(filterKey); // Convert filterKey to productKey
+    //             const productValue = product[productKey];
+    //             const filterValue = this.selectedFilters[filterKey];
+
+    //             console.log(`Checking product ${product.name}: ${productKey} = ${productValue}, filter = ${filterValue}`);
+
+    //             return productValue && productValue === filterValue;
+    //         });
+    //     });
+
+    //     // If filtering returns an empty list, retain the last non-empty filtered products
+    //     if (filteredProducts.length > 0) {
+    //         this.lastNonEmptyFilteredProducts = filteredProducts; // Store last successful filter result
+    //     }
+
+    //     this.endProducts = filteredProducts.length > 0 ? filteredProducts : this.lastNonEmptyFilteredProducts;
+
+
+    //     console.log("Filtered Products:", JSON.stringify(this.endProducts));
+    //     }
+
+    //     mapFilterKeyToProductKey(filterKey) {
+    //     return filterKey
+    //         .toLowerCase()              // Convert to lowercase
+    //         .replace(/\s(.)/g, match => match.toUpperCase()) // Capitalize first letter after space
+    //         .replace(/\s/g, "")         // Remove spaces
+    //         .replace(/^./, match => match.toLowerCase()); // Ensure first letter is lowercase
+    // }
+
+
+    handleFilterChange(event) {
+        const fieldName = event.target.label; // Read the dataset attribute
+        const selectedValue = event.detail.value; // Get the selected filter value
+
+        console.log(`Filter changed: ${fieldName} -> ${selectedValue}`);
+
+        // Store or remove filter values
+        if (selectedValue) {
+            this.selectedFilters[fieldName] = selectedValue;
+        } else {
+            delete this.selectedFilters[fieldName];
+        }
+
+        console.log('Updated selectedFilters:', JSON.stringify(this.selectedFilters));
+
+        // Apply the filters
+        this.applyFilters();
+    }
+
+    // applyFilters() {
+    // // If no products available, return empty array
+    // if (!this.fetchedEndProducts || this.fetchedEndProducts.length === 0) {
+    //     this.endProducts = [];
+    //     return;
+    // }
+
+    // // If no filters selected, show all products
+    // if (Object.keys(this.selectedFilters).length === 0) {
+    //     this.endProducts = [...this.fetchedEndProducts];
+    //     return;
+    // }
+
+    // // Apply filters
+    // this.endProducts = this.fetchedEndProducts.filter(product => {
+    //     return Object.keys(this.selectedFilters).every(filterKey => {
+    //         if (!this.selectedFilters[filterKey]) return true; // Skip "None" selections
+            
+    //         const productKey = this.mapFilterKeyToProductKey(filterKey);
+    //         const productValue = product[productKey] || product[productKey.replace('__c', '')];
+    //         const filterValue = this.selectedFilters[filterKey];
+            
+    //         return productValue && productValue === filterValue;
+    //     });
+    // });
+
+    // // Show warning if no products match filters
+    // if (this.endProducts.length === 0 && this.fetchedEndProducts.length > 0) {
+    //     this.showToast('No Match', 'No products match the selected filters', 'warning');
+    // }
+    // }
+
+    applyFilters() {
+    if (!this.fetchedEndProducts || this.fetchedEndProducts.length === 0) {
+        this.endProducts = [];
+        return;
+    }
+
+    // Create a Set of selected product IDs for easy lookup.
+    const selectedIds = new Set(this.selectedProducts.map(p => p.productId));
+
+    let filteredList = this.fetchedEndProducts;
+
+    // Apply filters if any are selected
+    if (Object.keys(this.selectedFilters).length > 0) {
+        filteredList = this.fetchedEndProducts.filter(product => {
+            return Object.keys(this.selectedFilters).every(filterKey => {
+                if (!this.selectedFilters[filterKey]) return true;
+
+                const productKey = this.mapFilterKeyToProductKey(filterKey);
+                const productValue = product[productKey] || product[productKey.replace('__c', '')];
+                const filterValue = this.selectedFilters[filterKey];
+
+                return productValue && productValue === filterValue;
+            });
+        });
+    }
+
+    // ✅ **FIX**: Map over the filtered list to re-apply the 'selected' state.
+    this.endProducts = filteredList.map(product => ({
+        ...product,
+        selected: selectedIds.has(product.id) // Check if the product's ID is in our set of selected IDs
+    }));
+
+    if (this.endProducts.length === 0 && this.fetchedEndProducts.length > 0) {
+        this.showToast('No Match', 'No products match the selected filters', 'warning');
+    }
+}
+
+    handleFilterChangeOnCropAppSol(event) {
+        const fieldName = event.target.label; // Read the dataset attribute
+        const selectedValue = event.detail.value; // Get the selected filter value
+
+        console.log(`Filter changed: ${fieldName} -> ${selectedValue}`);
+
+        // Store or remove filter values
+        if (selectedValue) {
+            this.selectedFilters[fieldName] = selectedValue;
+        } else {
+            delete this.selectedFilters[fieldName];
+        }
+
+        console.log('Updated selectedFilters:', JSON.stringify(this.selectedFilters));
+
+        // Apply the filters
+        this.applyFiltersOnCropAppSoln();
+    }
+
+// applyFiltersOnCropAppSoln() {
+//     if (!this.finalVisibleProductList || this.finalVisibleProductList.length === 0) {
+//         this.visibleProducts = [];
+//         return;
+//     }
+
+//     // If no filters are selected, show all products
+//     if (Object.keys(this.selectedFilters).length === 0) {
+//         this.visibleProducts = [...this.finalVisibleProductList];
+//         return;
+//     }
+
+//     this.visibleProducts = this.finalVisibleProductList.filter(product => {
+//         return Object.keys(this.selectedFilters).every(filterKey => {
+//             if (!this.selectedFilters[filterKey]) return true; // Skip empty filters
+            
+//             const productKey = this.mapFilterKeyToProductKey(filterKey);
+//             const productValue = product[productKey] || product[productKey.replace('__c', '')];
+//             const filterValue = this.selectedFilters[filterKey];
+            
+//             return productValue && productValue === filterValue;
+//         });
+//     });
+
+//     // If filters result in empty list but we have products, show message
+//     if (this.visibleProducts.length === 0 && this.finalVisibleProductList.length > 0) {
+//         this.showToast('No Match', 'No products match the selected filters', 'warning');
+//     }
+// }
+
+applyFiltersOnCropAppSoln() {
+    if (!this.finalVisibleProductList || this.finalVisibleProductList.length === 0) {
+        this.visibleProducts = [];
+        return;
+    }
+
+    // Create a Set of selected product IDs for easy lookup.
+    const selectedIds = new Set(this.selectedProducts.map(p => p.productId));
+
+    let filteredList = this.finalVisibleProductList;
+
+    // Apply filters if any are selected
+    if (Object.keys(this.selectedFilters).length > 0) {
+        filteredList = this.finalVisibleProductList.filter(product => {
+            return Object.keys(this.selectedFilters).every(filterKey => {
+                if (!this.selectedFilters[filterKey]) return true;
+
+                const productKey = this.mapFilterKeyToProductKey(filterKey);
+                const productValue = product[productKey] || product[productKey.replace('__c', '')];
+                const filterValue = this.selectedFilters[filterKey];
+
+                return productValue && productValue === filterValue;
+            });
+        });
+    }
+
+    // ✅ **FIX**: Map over the filtered list to re-apply the 'selected' state.
+    this.visibleProducts = filteredList.map(product => ({
+        ...product,
+        selected: selectedIds.has(product.Id) // Check if the product's ID is in our set of selected IDs
+    }));
+
+    if (this.visibleProducts.length === 0 && this.finalVisibleProductList.length > 0) {
+        this.currentPage = 1;
+        this.totalPages = 1;
+        this.showToast('No Match', 'No products match the selected filters', 'warning');
+    }
+}
+
+    mapFilterKeyToProductKey(filterKey) {
+        return filterKey
+            .toLowerCase()
+            .replace(/\s(.)/g, match => match.toUpperCase()) // Capitalize first letter after space
+            .replace(/\s/g, "")
+            .replace(/^./, match => match.toLowerCase()); // Ensure first letter is lowercase
+    }
+
+    @track filteredProdIds = [];
+
+     @track selectedFilterValues = {
+        'cropSolution': '',
+        'application': '',
+        'subApplication': '',
+        'productGroup': '',
+        'hpRange': '',
+        'productSeries': '',
+        'endProduct':''
+    };
+
+    // handleGetFilteredEndProducts(event) {
+    //     console.log('Inside handleGetFilteredEndProducts >>>>>>>>> ');
+    //     console.log('Child Event Captured >>>>>>>>> ');
+    //     console.log('Before this.selectedFilterValues>>>>' + JSON.stringify( this.selectedFilterValues));
+    //     const filteredEndProductsValues = event.detail.endProductValues;
+    //     this.selectedFilterValues=event.detail.selectedValues;
+    //     this.isSeriesSelectedInModal = true;
+    //     console.log('filteredEndProductsValues>>>>' + JSON.stringify(filteredEndProductsValues));
+    //     console.log(' this.selectedFilterValues>>>>' + JSON.stringify( this.selectedFilterValues));
+    //     if (filteredEndProductsValues != null) {
+    //         filteredEndProductsValues.filter(el => {
+    //             if (el.Product__c)
+    //                 this.filteredProdIds.push(el.Product__c);
+    //         })
+    //         console.log('this.filteredProdIds>>>>' + this.filteredProdIds);
+    //     }
+
+    //     if (this.filteredProdIds.length > 0) {
+    //         this.visibleProducts = [];
+    //         this.endProducts = [];
+    //         this.filterType='Filter';
+    //         this.fetchProducts();
+    //     }
+
+    // }
+
+    handleGetFilteredEndProducts(event) {
+    console.log('Child Event Captured >>>>>>>>> ');
+    const { endProductValues, selectedValues } = event.detail;
+
+    this.isSeriesSelectedInModal = true;
+    this.selectedFilterValues = selectedValues;
+
+    // STAGE the IDs instead of fetching immediately
+    if (endProductValues && endProductValues.length > 0) {
+        this.stagedFilteredProdIds = endProductValues
+            .map(el => el.Product__c)
+            .filter(Boolean);
+        console.log('Staged Product IDs>>>>' + this.stagedFilteredProdIds);
+    } else {
+        this.stagedFilteredProdIds = [];
+    }
+}
+
+}
+
+
+
+/***************************************************************************/
+
+public with sharing class ProductController {
+    @AuraEnabled(cacheable=true)
+    public static List<Product2> getAllProducts(String pricebookId, String oppId,List<String>prodIds,String filterType) {
+        // return [SELECT Id, Name, ProductCode, Description, Family, CreatedDate, Product_Image__c,Sub_Category__c,Product_Type__c,(Select Id,Name FROM Products__r) 
+        //             FROM Product2 
+        //             WHERE IsActive=true 
+        //             ORDER BY CreatedDate ASC ];
+        
+        
+        // return [ SELECT Id, Name, ProductCode, Description, Family, CreatedDate, Product_Image__c, Sub_Category__c, Product_Type__c,(SELECT Id, Name FROM Products__r)
+        // FROM Product2 WHERE IsActive = true AND Id IN (SELECT Product2Id FROM PricebookEntry WHERE Pricebook2Id = :pricebookId AND IsActive = true)ORDER BY CreatedDate ASC];
+        
+        // Fetch the PricebookId__c from the given Opportunity
+        try {
+            // Fetch the PricebookId__c from the given Opportunity
+            System.debug('Inside getAllProducts::');
+            System.debug('prodIds::::'+prodIds);
+            
+            System.debug('record Id :: ' + oppId);
+            String objectType = '';
+            if(oppId != null)
+                objectType = Id.valueOf(oppId).getSObjectType().getDescribe().getName();
+            System.debug('Object Type :: ' + objectType);
+            
+            if(objectType == 'Quote'){
+                Quote opp = [SELECT Pricebook2Id FROM Quote WHERE Id = :oppId LIMIT 1];
+                System.debug('Opp price Id::'+opp.Pricebook2Id);
+                // If the Opportunity doesn't have a Pricebook assigned, return an empty list
+                if (opp.Pricebook2Id == null) {
+                    return new List<Product2>();
+                }
+                List<Product2> prodList=new  List<Product2>();
+                if(filterType=='Filter'){
+                    prodList= [
+                SELECT Id, Name, ProductCode, Description, Family, CreatedDate,Quantity__c,Product_Model__c,
+                       Product_Image__c, Sub_Category__c, Product_Type__c, Bale_Shape__c, Bale_Size__c, Hitching_Category__c, Pick_Up_Width__c, No_of_Knotters__c, PTO_Input_Speed__c, GB_Mounting__c, Blade_Shape__c, Working_Width__c, X3_Point_Hitch_Type__c, Blade_Type__c, Single_Speed_Gearbox_Multispeed_Gearbox__c, Transmission_Type__c, Tilling_Width__c, Ground_Speed_Mechanism_Type__c, Engine_Power__c, Engine_Make__c, Emission_Norms__c, Elevator_Discharge_Height__c, Number_of_Rotors__c,
+                       (SELECT Id, Name,Quantity__c,Alternative_BOM__c,BOM_component__c,Description  FROM Products__r)
+                FROM Product2 
+                WHERE IsActive = true 
+                AND Id IN: prodIds AND RecordType.DeveloperName  = 'Material_Finished_Product'
+                AND Id IN (SELECT Product2Id FROM PricebookEntry WHERE Pricebook2Id = :opp.Pricebook2Id AND IsActive = true)
+                ORDER BY CreatedDate ASC
+              ];
+
+              //AND RecordType.DeveloperName  = 'Material_Finished_Product' 
+                }else if(filterType=='All'){
+                    prodList= [
+                SELECT Id, Name, ProductCode, Description, Family, CreatedDate,Quantity__c, Product_Model__c,
+                       Product_Image__c, Sub_Category__c, Product_Type__c, Bale_Shape__c, Bale_Size__c, Hitching_Category__c, Pick_Up_Width__c, No_of_Knotters__c, PTO_Input_Speed__c, GB_Mounting__c, Blade_Shape__c, Working_Width__c, X3_Point_Hitch_Type__c, Blade_Type__c, Single_Speed_Gearbox_Multispeed_Gearbox__c, Transmission_Type__c, Tilling_Width__c, Ground_Speed_Mechanism_Type__c, Engine_Power__c, Engine_Make__c, Emission_Norms__c, Elevator_Discharge_Height__c, Number_of_Rotors__c,
+                       (SELECT Id, Name,Quantity__c,Alternative_BOM__c,BOM_component__c,Description FROM Products__r)
+                FROM Product2 
+                WHERE IsActive = true AND RecordType.DeveloperName  = 'Material_Finished_Product'
+                //AND Id IN: prodIds
+                AND Id IN (SELECT Product2Id FROM PricebookEntry WHERE Pricebook2Id = :opp.Pricebook2Id AND IsActive = true)
+                ORDER BY CreatedDate ASC
+            ];
+                }
+                System.debug('prodList::::'+prodList);
+                System.debug('prodList size::::'+prodList.size());
+                return prodList;
+                
+            }
+            else{
+                List<Opportunity> oppList = [SELECT PricebookId__c,Pricebook2Id FROM Opportunity WHERE Id = :oppId LIMIT 1];
+                Opportunity opp = new Opportunity();
+                if(!oppList.isEmpty())
+                    opp = oppList[0];
+                System.debug('Opp price Id::'+opp.PricebookId__c);
+                // If the Opportunity doesn't have a Pricebook assigned, return an empty list
+                String pbId = opp.Pricebook2Id;
+                if (opp.PricebookId__c == null) {
+                    // return new List<Product2>();
+                    pbId = [SELECT Id FROM Pricebook2  LIMIT 1].Id; //Where IsStandard = true
+                }
+                List<Product2> prodList=new  List<Product2>();
+                if(filterType=='Filter'){
+                    prodList= [
+                SELECT Id, Name, ProductCode, Description, Family, CreatedDate,Quantity__c, Product_Model__c,
+                       Product_Image__c, Sub_Category__c, Product_Type__c, Bale_Shape__c, Bale_Size__c, Hitching_Category__c, Pick_Up_Width__c, No_of_Knotters__c, PTO_Input_Speed__c, GB_Mounting__c, Blade_Shape__c, Working_Width__c, X3_Point_Hitch_Type__c, Blade_Type__c, Single_Speed_Gearbox_Multispeed_Gearbox__c, Transmission_Type__c, Tilling_Width__c, Ground_Speed_Mechanism_Type__c, Engine_Power__c, Engine_Make__c, Emission_Norms__c, Elevator_Discharge_Height__c, Number_of_Rotors__c,
+                       (SELECT Id, Name,Quantity__c,Alternative_BOM__c,BOM_component__c,Description FROM Products__r)
+                FROM Product2 
+                WHERE IsActive = true AND RecordType.DeveloperName  = 'Material_Finished_Product'
+                AND Id IN: prodIds
+                AND Id IN (SELECT Product2Id FROM PricebookEntry WHERE Pricebook2Id = :opp.Pricebook2Id AND IsActive = true)
+                ORDER BY CreatedDate ASC
+              ];
+                }else if(filterType=='All'){
+                    prodList= [
+                SELECT Id, Name, ProductCode, Description, Family, CreatedDate,Quantity__c, Product_Model__c,
+                       Product_Image__c, Sub_Category__c, Product_Type__c, Bale_Shape__c, Bale_Size__c, Hitching_Category__c, Pick_Up_Width__c, No_of_Knotters__c, PTO_Input_Speed__c, GB_Mounting__c, Blade_Shape__c, Working_Width__c, X3_Point_Hitch_Type__c, Blade_Type__c, Single_Speed_Gearbox_Multispeed_Gearbox__c, Transmission_Type__c, Tilling_Width__c, Ground_Speed_Mechanism_Type__c, Engine_Power__c, Engine_Make__c, Emission_Norms__c, Elevator_Discharge_Height__c, Number_of_Rotors__c,
+                       (SELECT Id, Name,Quantity__c,Alternative_BOM__c,BOM_component__c,Description FROM Products__r)
+                FROM Product2 
+                WHERE IsActive = true AND RecordType.DeveloperName  = 'Material_Finished_Product'
+                //AND Id IN: prodIds
+                AND Id IN (SELECT Product2Id FROM PricebookEntry WHERE Pricebook2Id = :opp.Pricebook2Id AND IsActive = true)
+                ORDER BY CreatedDate ASC
+            ];
+                }
+                System.debug('prodList::::'+prodList);
+                System.debug('prodList size::::'+prodList.size());
+                return prodList;
+            }
+        } catch (Exception e) {
+            System.debug('Exception e : '+e.getLineNumber());
+           	System.debug('Exception Message : '+e.getMessage());
+            throw new AuraHandledException('Error fetching products: ' + e.getMessage());
+        }
+        
+        
+    }
+
+    @AuraEnabled(cacheable=true)
+public static List<Product2> getAllProductsByUserCurrency(List<String> prodIds, String filterType) {
+    try {
+       // System.debug('Inside getAllProductsByUserCurrency');
+      //  System.debug('prodIds: ' + prodIds);
+
+        Id accIDZ = SecondaryOrderController.getCurrentUserAccountId();
+       Account acc = [SELECT Id, CurrencyIsoCode FROM Account WHERE Id = :accIDZ LIMIT 1];
+
+        // Get currency of current user
+       // User currentUser = [SELECT Id, Name, CurrencyIsoCode FROM User WHERE Id = :UserInfo.getUserId()];
+       // String userCurrency = currentUser.CurrencyIsoCode;
+       // System.debug('User CurrencyIsoCode: ' + userCurrency);
+
+        // Fetch pricebook matching user's currency
+        List<Pricebook2> pbList = [
+            SELECT Id, Name 
+            FROM Pricebook2 
+            WHERE IsActive = true AND CurrencyIsoCode = :acc.CurrencyIsoCode 
+            LIMIT 1
+        ];
+        
+        if (pbList.isEmpty()) {
+            throw new AuraHandledException('No active pricebook found for acc currency: ');
+        }
+        
+        Id pricebookId = pbList[0].Id;
+
+        // Fetch product records based on filterType
+        List<Product2> prodList = new List<Product2>();
+
+        if (filterType == 'Filter') {
+            prodList = [
+                SELECT Id, Name, ProductCode, Description, Family, CreatedDate, Quantity__c, Product_Model__c,
+                       Product_Image__c, Sub_Category__c, Product_Type__c, Bale_Shape__c, Bale_Size__c, Hitching_Category__c, Pick_Up_Width__c, No_of_Knotters__c, PTO_Input_Speed__c, GB_Mounting__c, Blade_Shape__c, Working_Width__c, X3_Point_Hitch_Type__c, Blade_Type__c, Single_Speed_Gearbox_Multispeed_Gearbox__c, Transmission_Type__c, Tilling_Width__c, Ground_Speed_Mechanism_Type__c, Engine_Power__c, Engine_Make__c, Emission_Norms__c, Elevator_Discharge_Height__c, Number_of_Rotors__c,
+                       (SELECT Id, Name, Quantity__c, Alternative_BOM__c, BOM_component__c, Description FROM Products__r)
+                FROM Product2
+                WHERE IsActive = true
+                AND RecordType.DeveloperName = 'Material_Finished_Product'
+                AND Id IN :prodIds
+                AND Id IN (SELECT Product2Id FROM PricebookEntry WHERE Pricebook2Id = :pricebookId AND IsActive = true)
+                ORDER BY CreatedDate ASC
+            ];
+        } else if (filterType == 'All') {
+            prodList = [
+                SELECT Id, Name, ProductCode, Description, Family, CreatedDate, Quantity__c, Product_Model__c,
+                       Product_Image__c, Sub_Category__c, Product_Type__c, Bale_Shape__c, Bale_Size__c, Hitching_Category__c, Pick_Up_Width__c, No_of_Knotters__c, PTO_Input_Speed__c, GB_Mounting__c, Blade_Shape__c, Working_Width__c, X3_Point_Hitch_Type__c, Blade_Type__c, Single_Speed_Gearbox_Multispeed_Gearbox__c, Transmission_Type__c, Tilling_Width__c, Ground_Speed_Mechanism_Type__c, Engine_Power__c, Engine_Make__c, Emission_Norms__c, Elevator_Discharge_Height__c, Number_of_Rotors__c,
+                       (SELECT Id, Name, Quantity__c, Alternative_BOM__c, BOM_component__c, Description FROM Products__r)
+                FROM Product2
+                WHERE IsActive = true
+                AND RecordType.DeveloperName = 'Material_Finished_Product'
+                AND Id IN (SELECT Product2Id FROM PricebookEntry WHERE Pricebook2Id = :pricebookId AND IsActive = true)
+                ORDER BY CreatedDate ASC
+            ];
+        }
+
+        System.debug('prodList size: ' + prodList.size());
+        return prodList;
+
+    } catch (Exception e) {
+        throw new AuraHandledException('Error fetching products by user currency: ' + e.getMessage());
+    }
+}
+
+
+
+    @AuraEnabled(cacheable=true)
+    public static List<Product_Configurator__c> getProductGroups(){
+        return [
+            SELECT Id, Name
+            FROM Product_Configurator__c
+            WHERE Product_Category_Type__c = 'ProductGroup'
+        ];
+    }
+    
+    @AuraEnabled(cacheable=true)
+    public static List<Product_Configurator__c> getEndProducts(Id productGroupId) {
+        // Step 1: Fetch all Product Series IDs in a single query
+        List<Product_Configurator__c> productSeriesList = [
+            SELECT Id
+            FROM Product_Configurator__c
+            WHERE Product_Category_Type__c = 'Product Series'
+            AND Parent_Product_Configurator__c = :productGroupId
+        ];
+        
+        // Extracting Series IDs from the query result
+        Set<Id> productSeriesIds = new Set<Id>();
+        for (Product_Configurator__c series : productSeriesList) {
+            productSeriesIds.add(series.Id);
+        }
+        
+        // Step 2: Fetch all End Products related to those Product Series
+        if (productSeriesIds.isEmpty()) {
+            return new List<Product_Configurator__c>(); // Return empty list if no series found
+        }
+        
+        return [
+            SELECT Id, Name, Parent_Product_Configurator__r.Name
+            FROM Product_Configurator__c
+            WHERE Product_Category_Type__c = 'End Product'
+            AND Parent_Product_Configurator__c IN :productSeriesIds
+        ];
+    }
+    
+    
+    
+    @AuraEnabled(cacheable=true)
+    public static String getProductImageURL(Id productId) {
+        List<ContentDocumentLink> links = [
+            SELECT ContentDocumentId 
+            FROM ContentDocumentLink 
+            WHERE LinkedEntityId = :productId 
+            LIMIT 1
+        ];
+        
+        if (!links.isEmpty()) {
+            String contentDocId = links[0].ContentDocumentId;
+            return '/sfc/servlet.shepherd/version/download/' + contentDocId;
+        }
+        return null;
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static String getAccountCurrency(Id accountId) {
+        if (accountId == null) {
+            return null;
+        }
+        Account acc = [SELECT CurrencyIsoCode FROM Account WHERE Id = :accountId];
+        return acc.CurrencyIsoCode;
+    }
+
+        @AuraEnabled(cacheable=true)
+    public static Id getPricebookIdByCurrency(String currencyCode) {
+        if (String.isBlank(currencyCode)) {
+            return null;
+        }
+        // Find the first active pricebook that matches the currency.
+        // You might have multiple, so LIMIT 1 gets the first one found.
+        List<Pricebook2> pricebooks = [
+            SELECT Id
+            FROM Pricebook2
+            WHERE CurrencyIsoCode = :currencyCode AND IsActive = true
+            LIMIT 1
+        ];
+
+        if (!pricebooks.isEmpty()) {
+            return pricebooks[0].Id;
+        }
+        // Return null if no active pricebook is found for that currency
+        return null;
+    }
+
+
+
+}
+
+
+
+
