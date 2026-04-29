@@ -1,0 +1,368 @@
+public class PurchaseOrderAPICallout {
+
+    // Touch the above code when you are ready :: 
+    @AuraEnabled
+    public static String sendPurchaseOrdersToSAP(String poIds) {
+        System.debug('Input poIds: ' + poIds);
+
+        // List of successfully synced POs
+        List<Purchase_Order__c> successPOs = new List<Purchase_Order__c>();
+
+        String resultMessage = '';
+        Boolean isSuccess = false;
+
+        // String username = 'TABAP';
+        // String password = 'Tabap@1234';
+        // String authHeader = 'Basic ' + EncodingUtil.base64Encode(Blob.valueOf(username + ':' + password));
+
+        SAP_API_Endpoint__mdt apiConfig = getCredentials();
+        // Authentication from metadata
+        String username = apiConfig.Username__c;
+        String password = apiConfig.Password__c;
+        String authHeader = 'Basic ' + EncodingUtil.base64Encode(Blob.valueOf(username + ':' + password));
+
+        List<Id> poIdList = new List<Id>();
+        if (poIds.contains(',')) {
+            for (String s : poIds.split(',')) {
+                if (String.isNotBlank(s)) {
+                    poIdList.add((Id) s.trim());
+                }
+            }
+        } else {
+            poIdList.add((Id) poIds.trim());
+        }
+
+        List<Purchase_Order__c> purchaseOrders = [
+            SELECT 
+                Id, Name, PO_NO__c, CreatedDate, Distribution_Channel__c, Parent_Account_Id__c,
+                DOC_TYPE__c, SALES_ORG__c, Division__c, REQ_DATE_H__c, SALES_OFF__c,
+                PURCH_NO_C__c, PURCH_DATE__c, PARTN_NUMB__c, PARTN_NUMB1__c, Account__c,
+                CUST_PONO__c, SALES_GRP__c, SHIP_TYPE__c, INCO_VERSION__c, INCO_Terms__c,
+                Payment_Terms__c, Bank_Name__c, Port_of_Loading__c, Port_of_Discharge__c,Account__r.Incoterms_Location_1__c,
+                DESC_GOODS__c, Opportunity__c, PURCH_NO_S__c, Quote__c,PO_Number_unique__c, Account__r.CurrencyIsoCode,
+
+                Exporter__Street__s, Exporter__City__s, Exporter__PostalCode__s,
+                Exporter__StateCode__s, Exporter__CountryCode__s,
+                Consignee__Street__s, Consignee__City__s, Consignee__PostalCode__s,
+                Consignee__StateCode__s, Consignee__CountryCode__s, Quote__r.Opportunity.CloseDate,
+                Opportunity__r.Pricebook2Id, Total_CIF__c, REMARKS__c,
+
+                Final_Destination__c,Pricing_Type__c,IHC_Transport__c,Packing_Charges__c,
+                Discount__c,SOC_Charges__c,Inspection_Charges__c,Insurance__c,Incoterms_Location__c
+            FROM Purchase_Order__c
+            WHERE Id IN :poIdList
+        ];
+
+        System.debug('Fetched Purchase Orders: ' + purchaseOrders.size());
+
+        if (!purchaseOrders.isEmpty()) {
+            Map<Id, List<Purchase_Order_Line_Item__c>> lineItemMap = new Map<Id, List<Purchase_Order_Line_Item__c>>();
+            for (Purchase_Order_Line_Item__c line : [
+                SELECT 
+                Id, Purchase_Order__c, PURCH_NO_S__c, ITM_NUMBER__c, Material__c, TARGET_QTY__c,
+                PLANT__c, ITEM_CATEG__c, REMARKS__c, SERIALNO__c, Priority__c, Quantity__c,
+                Purchase_Order_Date__c, STORE_LOC__c, Product__r.Material_Code__c, Product__r.PLANT__c,
+                Product__c, Product__r.ProductCode, PurcahseOrderProducts_External_ID__c,
+                Product__r.RecordType.DeveloperName, Item_Description__c,Parent_POLI__c,Alternative_BOM__c,
+                Alternate_Product_Model__c, Alternate_Product_Name__c
+                FROM Purchase_Order_Line_Item__c
+                WHERE Purchase_Order__c IN :poIdList
+                AND Product__r.RecordType.DeveloperName != 'Alternate_BOM'
+            ]) {
+                if (!lineItemMap.containsKey(line.Purchase_Order__c)) {
+                    lineItemMap.put(line.Purchase_Order__c, new List<Purchase_Order_Line_Item__c>());
+                }
+                lineItemMap.get(line.Purchase_Order__c).add(line);
+            }
+
+            System.debug('purchaseOrders size '+purchaseOrders.size()+'.  '+purchaseOrders);
+
+            for (Purchase_Order__c po : purchaseOrders) {
+                try {
+                    List<Purchase_Order_Line_Item__c> lineItems = lineItemMap.get(po.Id);
+                    System.debug(' Line Items : ' + lineItems);
+                    System.debug(' Line Item Code : ' + lineItems[0].Product__r.ProductCode);
+                    PurchaseOrderAPIRequestWrapper requestWrapper = new PurchaseOrderAPIRequestWrapper(po, lineItems);
+                    System.debug('requestWrapper > '+requestWrapper);
+                    String requestBody = generateOrderedJSON(requestWrapper);
+                    System.debug('requestBody > '+requestBody);
+                    String endpoint = getEndpointUrl('POToSOCreation');
+
+                    HttpRequest request = new HttpRequest();
+                    request.setTimeout(20000);
+                    request.setMethod('POST');
+                    request.setEndpoint(endpoint );
+                    request.setHeader('Content-Type', 'application/json');
+                    request.setHeader('Authorization', authHeader);
+                    request.setBody(requestBody);
+
+                    Http http = new Http();
+                    HttpResponse response = http.send(request);
+                    String responseBody = response.getBody();
+
+                    System.debug('🔵 Raw SAP responseBody: ' + responseBody);
+                    System.debug('🔵 Status Code: ' + response.getStatusCode());
+
+                    SAPResponseWrapper sapResp;
+                    try {
+                        // Optional: fix any known field name issues
+                        String cleanedResponseBody = responseBody.replace('"PO_Number ":', '"PO_Number":');
+                        System.debug('🧼 Cleaned responseBody: ' + cleanedResponseBody);
+                        cleanedResponseBody = cleanedResponseBody.replace('"SO_Line_Item_External_Id__c":', '"SO_Line_Item_External_Id":');
+                        System.debug('🧼 Cleaned responseBody: ' + cleanedResponseBody);
+
+                        sapResp = (SAPResponseWrapper) JSON.deserialize(cleanedResponseBody, SAPResponseWrapper.class);
+                        System.debug('✅ Deserialized SAP Response: ' + sapResp);
+
+                    } catch (Exception parseEx) {
+                        resultMessage += '\n⚠️ Failed to parse SAP response for ' + po.Name + ': ' + parseEx.getMessage();
+                        ErrorLogs.response(parseEx.getMessage(), responseBody, response.getStatusCode(), 'Parse Error', 'PurchaseOrderCallout');
+                        continue;
+                    }
+
+
+                    String poNum = sapResp != null ? sapResp.PO_Number : 'N/A';
+                    String soNum = sapResp != null ? sapResp.SO_Number : 'N/A';
+                    String status = sapResp != null ? sapResp.Status : 'Unknown';
+                    String reason = sapResp != null ? sapResp.Reason : 'No reason provided';
+
+                    if (status == 'Success') {
+                        resultMessage += '\n✅ Success for ' + po.Name + ' | SO: ' + soNum + ' | Reason: ' + reason;
+                        // 🔁 Pass responseBody and PO_Items to the handler
+                        PurchaseOrderResponseHandler.handleResponse(responseBody,sapResp, po); // modify this method to accept sapResp.PO_Items if needed
+                        successPOs.add(po);
+                    } else {
+                        resultMessage += '\n❌ Failed for ' + po.Name + ' | PO: ' + poNum + ' | SO: ' + soNum + ' | Reason: ' + reason;
+                        // resultMessage += '\n'+ po.Name + ' | PO: ' + poNum + ' | SO: ' + soNum + ' | Reason: ' + reason;
+                        ErrorLogs.response(responseBody, requestBody, response.getStatusCode(), 'SAP Error', 'PurchaseOrderCallout');
+                    }
+
+                } catch (Exception e) {
+                    resultMessage += '\n🚫 Exception for ' + po.Name + ': ' + e.getMessage();
+                    ErrorLogs.response(e.getMessage(), '', -1, 'Exception', 'PurchaseOrderCallout');
+                }
+            }
+
+            updateRelatedClaims(successPOs);
+        }
+
+        return resultMessage;
+    }
+
+    public static String getEndpointUrl(String apiName) {
+        SAP_API_Endpoint__mdt endpointConfig = [
+            SELECT Endpoint_URL__c 
+            FROM SAP_API_Endpoint__mdt 
+            WHERE DeveloperName = :apiName 
+            LIMIT 1
+        ];
+        return endpointConfig.Endpoint_URL__c;
+    }
+
+    public static SAP_API_Endpoint__mdt getCredentials() {
+        return [
+            SELECT Username__c,Password__c
+            FROM SAP_API_Endpoint__mdt 
+            WHERE DeveloperName = 'Credentials' 
+            LIMIT 1
+        ];
+    }
+    
+
+    // @AuraEnabled - Commenting here - Nathan - Enhanced ver below
+    // public static String checkMandatoryPOLineItemFields(String poId) {
+    //     // Query only line items linked to products with RecordType = 'Spares' or 'Material'
+    //     List<Purchase_Order_Line_Item__c> lineItems = [
+    //         SELECT Id, PLANT__c, STORE_LOC__c, Product__r.RecordType.Name, Product__r.Name
+    //         FROM Purchase_Order_Line_Item__c
+    //         WHERE Purchase_Order__c = :poId
+    //         AND Product__r.RecordType.Name IN ('Spares', 'Material (Finished Product)')
+    //     ];
+
+    //     List<String> missingFields = new List<String>();
+    //     Set<String> productName = new Set<String>();
+    //     for (Purchase_Order_Line_Item__c item : lineItems) {
+    //         if (String.isBlank(item.PLANT__c)) {
+    //             missingFields.add('Plant');
+    //             productName.add(item.Product__r.Name);
+    //         }
+    //         if (String.isBlank(item.STORE_LOC__c)) {
+    //             missingFields.add('Storage Location');
+    //             productName.add(item.Product__r.Name);
+    //         }
+    //     }
+
+    //     if (!missingFields.isEmpty()) {
+    //         return 'Missing required fields for item: ' + String.join(new List<String>(new Set<String>(missingFields)), ', ');
+    //     }
+
+    //     return ''; // All good
+    // }
+
+    @AuraEnabled
+    public static String checkMandatoryPOLineItemFields(String poId) {
+        if (String.isBlank(poId)) return 'Invalid Purchase Order ID.';
+
+        List<Purchase_Order_Line_Item__c> lineItems = [
+            SELECT Id, PLANT__c, STORE_LOC__c, Product__r.RecordType.Name, Product__r.Name
+            FROM Purchase_Order_Line_Item__c
+            WHERE Purchase_Order__c = :poId
+            AND Product__r.RecordType.Name IN ('Spares', 'Material (Finished Product)')
+        ];
+
+        if (lineItems.isEmpty()) {
+            return 'No matching line items found for the given Purchase Order.';
+        }
+
+        Map<String, Set<String>> productMissingFieldMap = new Map<String, Set<String>>();
+
+        for (Purchase_Order_Line_Item__c item : lineItems) {
+            Set<String> missingFields = new Set<String>();
+            
+            if (String.isBlank(item.PLANT__c)) {
+                missingFields.add('Plant');
+            }
+            if (String.isBlank(item.STORE_LOC__c)) {
+                missingFields.add('Storage Location');
+            }
+
+            if (!missingFields.isEmpty()) {
+                String productName = item.Product__r != null ? item.Product__r.Name : 'Unknown Product';
+                if (!productMissingFieldMap.containsKey(productName)) {
+                    productMissingFieldMap.put(productName, new Set<String>());
+                }
+                productMissingFieldMap.get(productName).addAll(missingFields);
+            }
+        }
+
+        if (!productMissingFieldMap.isEmpty()) {
+            List<String> errorMessages = new List<String>();
+            for (String product : productMissingFieldMap.keySet()) {
+                errorMessages.add('Product: ' + product + ' → Missing: ' + String.join(new List<String>(productMissingFieldMap.get(product)), ', '));
+            }
+            return 'Missing required fields:\n' + String.join(errorMessages, '\n');
+        }
+
+        return ''; // All fields are filled
+    }
+
+
+
+    public static String generateOrderedJSON(PurchaseOrderAPIRequestWrapper wrapper) {
+        JSONGenerator gen = JSON.createGenerator(true);
+
+        gen.writeStartObject();
+        gen.writeStringField('PURC_ORDER', wrapper.PURC_ORDER);
+        gen.writeStringField('CUST_PONO', wrapper.CUST_PONO);
+        gen.writeStringField('DOC_TYPE', wrapper.DOC_TYPE);
+        gen.writeStringField('SALES_ORG', wrapper.SALES_ORG);
+        gen.writeStringField('DISTR_CHAN', wrapper.DISTR_CHAN);
+        gen.writeStringField('DIVISION', wrapper.DIVISION);
+        gen.writeStringField('REQ_DATE_H', wrapper.REQ_DATE_H);
+        gen.writeStringField('SALES_OFF', wrapper.SALES_OFF);
+        gen.writeStringField('SALES_GRP', wrapper.SALES_GRP);
+        gen.writeStringField('SHIP_TYPE', wrapper.SHIP_TYPE);
+        gen.writeStringField('INCO_VERSION', wrapper.INCO_VERSION);
+        gen.writeStringField('INCO_TERMS', wrapper.INCO_TERMS);
+        gen.writeStringField('PAYM_TERMS', wrapper.PAYM_TERMS);
+        gen.writeStringField('BANK_NAME', wrapper.BANK_NAME);
+        gen.writeStringField('PORT_LOADING', wrapper.PORT_LOADING);
+        gen.writeStringField('PORT_DISCHARGE', wrapper.PORT_DISCHARGE);
+        gen.writeStringField('DESC_GOODS', wrapper.DESC_GOODS);
+        gen.writeStringField('PURCH_NO_C', wrapper.PURCH_NO_C);
+        gen.writeStringField('PURCH_DATE', wrapper.PURCH_DATE);
+        gen.writeStringField('PARTN_NUMB', wrapper.PARTN_NUMB);
+        gen.writeStringField('PARTN_NUMB1', wrapper.PARTN_NUMB1);
+
+        gen.writeStringField('FINAL_DESTINATION', String.valueOf(wrapper.FINAL_DESTINATION));
+        gen.writeStringField('PRICING_TYPE', String.valueOf(wrapper.PRICING_TYPE));
+        gen.writeStringField('IHC_TRANSPORT', String.valueOf(wrapper.IHC_TRANSPORT));
+        gen.writeStringField('PACKING_CHARGES', String.valueOf(wrapper.PACKING_CHARGES));
+        gen.writeStringField('DISCOUNT', String.valueOf(wrapper.DISCOUNT));
+        gen.writeStringField('SOC_CHARGES', String.valueOf(wrapper.SOC_CHARGES));
+        gen.writeStringField('INSPECTION_CHARGES', String.valueOf(wrapper.INSPECTION_CHARGES));
+        gen.writeStringField('INSURANCE_CHARGES', String.valueOf(wrapper.INSURANCE_CHARGES));
+gen.writeStringField('INCO_LOCATION', String.valueOf(wrapper.INCO_LOCATION));
+
+        gen.writeFieldName('PO_Items');
+        gen.writeStartArray();
+        for (PurchaseOrderAPIRequestWrapper.PurchaseOrderLineItemWrapper item : wrapper.PO_Items) {
+            gen.writeStartObject();
+            gen.writeStringField('MATERIAL', item.MATERIAL);
+            gen.writeStringField('TARGET_QTY', item.TARGET_QTY);
+            gen.writeStringField('PLANT', item.PLANT);
+            gen.writeStringField('ITEM_CATEG', item.ITEM_CATEG);
+            gen.writeStringField('REMARKS', item.REMARKS);
+            gen.writeStringField('SERIALNO', item.SERIALNO);
+            gen.writeStringField('PRIORITY', item.PRIORITY);
+            gen.writeStringField('PURCH_NO_S', item.PURCH_NO_S);
+            gen.writeStringField('PO_DAT_S', item.PO_DAT_S);
+            gen.writeStringField('STLAL', item.STLAL);
+            gen.writeStringField('STORE_LOC', item.STORE_LOC);
+            gen.writeStringField('ALTERNATE_PRODUCT_NAME', item.ALTERNATE_PRODUCT_NAME);
+            gen.writeStringField('ALTERNATE_PRODUCT_MODEL', item.ALTERNATE_PRODUCT_MODEL);
+            gen.writeEndObject();
+        }
+        gen.writeEndArray();
+
+        gen.writeEndObject();
+        return gen.getAsString();
+    }
+
+    public static String decodeNumericHtmlEntities(String input) {
+        String result = input;
+        Pattern pattern = Pattern.compile('&#(\\d+);');
+        Matcher matcher = pattern.matcher(result);
+
+        Set<String> matchedEntities = new Set<String>();
+
+        while (matcher.find()) {
+            String fullMatch = matcher.group(0); // e.g., "&#124;"
+            String codeStr = matcher.group(1);   // e.g., "124"
+
+            if (!matchedEntities.contains(fullMatch)) {
+                matchedEntities.add(fullMatch);
+
+                Integer code = Integer.valueOf(codeStr);
+
+                // Convert integer to char using char array
+                List<Integer> codeList = new List<Integer>{ code };
+                String replacement = String.fromCharArray(codeList);
+
+                result = result.replace(fullMatch, replacement);
+            }
+        }
+        return result;
+    }
+
+    
+    public static void updateRelatedClaims(List<Purchase_Order__c> successPOs){ 
+        System.debug('successPOs: '+successPOs);
+
+        if (successPOs == null || successPOs.isEmpty()) {
+            System.debug('No successful POs passed for claim update.');
+            return;
+        }
+
+        List<Warranty_Claim__c> relatedClaims = [SELECT Id, Claim_Status__c, Purchase_Order__c FROM Warranty_Claim__c WHERE Purchase_Order__c IN :new Map<Id, Purchase_Order__c>(successPOs).keySet()];
+
+        System.debug('relatedClaims: '+relatedClaims);
+        List<Warranty_Claim__c> claimsToUpdate = new List<Warranty_Claim__c>();
+        for(Warranty_Claim__c wc : relatedClaims){
+            if(wc.Claim_Status__c == 'Open'){
+                wc.Claim_Status__c = 'Synced TO SAP';
+                claimsToUpdate.add(wc);
+            }
+        }
+
+        System.debug('claimsToUpdate size : '+claimsToUpdate.size());
+
+        if(!claimsToUpdate.isEmpty()){
+            try{
+                update claimsToUpdate;
+            }catch(Exception e){
+                System.debug('Error occurred while updating related claims. Error: '+e);
+            }
+        }
+    }
+}
