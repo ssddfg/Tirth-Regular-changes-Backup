@@ -1,0 +1,197 @@
+public class PurchaseOrderAPIRequestWrapper {
+    public String PURC_ORDER;
+    public String CUST_PONO;
+    public String DOC_TYPE;
+    public String SALES_ORG;
+    public String DISTR_CHAN;
+    public String DIVISION;
+    public String REQ_DATE_H;
+    public String SALES_OFF;
+    public String SALES_GRP;
+    public String SHIP_TYPE;
+    public String INCO_VERSION;
+    public String INCO_TERMS;
+    public String PAYM_TERMS;
+    public String BANK_NAME;
+    public String PORT_LOADING;
+    public String PORT_DISCHARGE;
+    public String DESC_GOODS;
+    public String PURCH_NO_C;
+    public String PURCH_DATE;
+    public String PARTN_NUMB;
+    public String PARTN_NUMB1;
+
+    public String PRICING_TYPE;         // <-- Added
+    public Decimal IHC_TRANSPORT;       // <-- Added
+    public Decimal PACKING_CHARGES;     // <-- Added
+    public Decimal DISCOUNT;            // <-- Added
+    public Decimal SOC_CHARGES;         // <-- Added
+    public Decimal INSPECTION_CHARGES;  // <-- Added
+    public Decimal INSURANCE_CHARGES;   // <-- Added
+    public String FINAL_DESTINATION; // <-- Added
+	public String INCO_LOCATION;
+    
+    public static Map<String, String> parentPOLIVsSTLAL = new Map<String, String>();
+    public List<PurchaseOrderLineItemWrapper> PO_Items;
+
+	public class MyException extends Exception {}
+
+    /**
+     * Generates a random integer between 1 and 1000 (inclusive)
+     * @return Integer - Random number between 1-1000
+     */
+    public static Integer generateRandomNumber() {
+        // Create an instance of the Crypto class for secure random number generation
+        Integer randomValue = Crypto.getRandomInteger();
+        
+        // Ensure the value is positive (absolute value)
+        Integer positiveValue = Math.abs(randomValue);
+        
+        // Modulo 1000 to get a value between 0-999, then add 1 to make it 1-1000
+        Integer randomNumber = Math.mod(positiveValue, 1000) + 1;
+        
+        return randomNumber;
+    }
+    
+    // Example usage:
+    // Integer randomNum = generateRandomNumber();
+    // System.debug('Random number: ' + randomNum);
+	public String validationMessage { get; set; }
+    public PurchaseOrderAPIRequestWrapper(Purchase_Order__c PO, List<Purchase_Order_Line_Item__c> lineItems) {
+         this.PURC_ORDER      = String.isNotBlank(PO.PO_Number_unique__c) ? PO.PO_Number_unique__c : '';
+        //this.PURC_ORDER = 'PO-003411'+generateRandomNumber();
+
+        this.CUST_PONO       = String.isNotBlank(PO.CUST_PONO__c)     ? PO.CUST_PONO__c : String.isNotBlank(PO.PO_Number_unique__c) ? PO.PO_Number_unique__c : '';
+        this.DOC_TYPE        = String.isNotBlank(PO.DOC_TYPE__c)      ? PO.DOC_TYPE__c : '';
+        this.SALES_ORG       = String.isNotBlank(PO.SALES_ORG__c)     ? PO.SALES_ORG__c : '';
+        this.DISTR_CHAN      = String.isNotBlank(PO.Distribution_Channel__c) ? PO.Distribution_Channel__c : '';
+        this.DIVISION        = String.isNotBlank(PO.Division__c)      ? PO.Division__c : '';
+        this.REQ_DATE_H      = (PO.REQ_DATE_H__c != null) ? formatDate(PO.REQ_DATE_H__c) : formatDate(PO.Quote__r.Opportunity.CloseDate);
+        this.SALES_OFF       = String.isNotBlank(PO.SALES_OFF__c)     ? PO.SALES_OFF__c : '';
+        //this.SALES_GRP       = (String.isNotBlank(PO.SALES_GRP__c) && PO.SALES_GRP__c.length() >= 2)
+                               //? PO.SALES_GRP__c.substring(0, 2) : 'E02';
+        
+         this.SALES_GRP = PO.SALES_GRP__c != null ? PO.SALES_GRP__c : '';
+        
+        this.SHIP_TYPE       = String.isNotBlank(PO.SHIP_TYPE__c)     ? PO.SHIP_TYPE__c : '';
+        this.INCO_VERSION    = String.isNotBlank(PO.INCO_VERSION__c)  ? PO.INCO_VERSION__c : '';
+        this.INCO_TERMS      = String.isNotBlank(PO.INCO_Terms__c)    ? PO.INCO_Terms__c : '';
+        this.PAYM_TERMS      = PO.Payment_Terms__c != null ? PO.Payment_Terms__c.split('-')[0] : '';
+        this.BANK_NAME       = String.isNotBlank(PO.Bank_Name__c)     ? PO.Bank_Name__c : '';
+        this.PORT_LOADING    = String.isNotBlank(PO.Port_of_Loading__c) ? PO.Port_of_Loading__c : '';
+        this.PORT_DISCHARGE  = String.isNotBlank(PO.Port_of_Discharge__c) ? PO.Port_of_Discharge__c : '';
+        this.DESC_GOODS      = String.isNotBlank(PO.DESC_GOODS__c)    ? PO.DESC_GOODS__c : '';
+        this.PURCH_NO_C      = String.isNotBlank(PO.PURCH_NO_C__c)    ? PO.PURCH_NO_C__c : '';
+        this.PURCH_DATE      = formatDate(PO.PURCH_DATE__c);
+        //this.PARTN_NUMB      = String.isNotBlank(PO.PARTN_NUMB__c)    ? PO.PARTN_NUMB__c : 'TAEX00168';
+        //this.PARTN_NUMB1     = String.isNotBlank(PO.PARTN_NUMB1__c)   ? PO.PARTN_NUMB1__c : 'TAEX00168';
+
+
+		if (String.isBlank(po.PARTN_NUMB__c) || String.isBlank(po.PARTN_NUMB1__c)) {
+        throw new MyException('❌ Customer Number(Ship to Party) and Customer Number(Sold to Party) are required before syncing to SAP.');
+    }
+
+
+        this.PARTN_NUMB  = PO.PARTN_NUMB__c;
+        this.PARTN_NUMB1 = PO.PARTN_NUMB1__c;
+        
+        this.FINAL_DESTINATION = String.isNotBlank(PO.Final_Destination__c) ? PO.Final_Destination__c : ''; //text
+        this.PRICING_TYPE = String.isNotBlank(PO.Pricing_Type__c) ? PO.Pricing_Type__c.toUpperCase() : ''; //picklist
+        this.IHC_TRANSPORT = PO.IHC_Transport__c != null ? PO.IHC_Transport__c : 0;//currecny type
+        this.PACKING_CHARGES = PO.Packing_Charges__c != null ? PO.Packing_Charges__c : 0;//currecny type
+        this.DISCOUNT = PO.Discount__c != null ? PO.Discount__c : 0;//currecny type
+        this.SOC_CHARGES = PO.SOC_Charges__c != null ? PO.SOC_Charges__c : 0;//currecny type
+        this.INSPECTION_CHARGES = PO.Inspection_Charges__c != null ? PO.Inspection_Charges__c : 0;//currecny type
+        this.INSURANCE_CHARGES = PO.Insurance__c != null ? PO.Insurance__c : 0;//currecny type
+		this.INCO_LOCATION = String.isNotBlank(PO.Incoterms_Location__c) ? PO.Incoterms_Location__c : ''; // changes here - Nathan - TUS - 225
+
+        System.debug('this.FINAL_DESTINATION'+this.FINAL_DESTINATION+'this.PRICING_TYPE'+this.PRICING_TYPE+'this.IHC_TRANSPORT'+this.IHC_TRANSPORT+'this.PACKING_CHARGES'+this.PACKING_CHARGES+'this.DISCOUNT'+this.DISCOUNT+'this.SOC_CHARGES'+this.SOC_CHARGES+'this.INSPECTION_CHARGES'+this.INSPECTION_CHARGES+'this.INSURANCE_CHARGES'+this.INSURANCE_CHARGES);
+
+        
+        
+        this.PO_Items = new List<PurchaseOrderLineItemWrapper>();
+        /*for (Purchase_Order_Line_Item__c item : lineItems) {
+            this.PO_Items.add(new PurchaseOrderLineItemWrapper(item, this.PURC_ORDER));
+        }*/
+
+		for (Purchase_Order_Line_Item__c item : lineItems) {
+            //this.PO_Items.add(new PurchaseOrderLineItemWrapper(item, this.PURC_ORDER));
+            if(!parentPOLIVsSTLAL.containsKey(item.Parent_POLI__c) &&
+               item.Parent_POLI__c != null){
+                   parentPOLIVsSTLAL.put(item.Parent_POLI__c, item.Alternative_BOM__c);
+               }
+        }
+        for (Purchase_Order_Line_Item__c item : lineItems) {
+            if(item.Parent_POLI__c == null)
+            	this.PO_Items.add(new PurchaseOrderLineItemWrapper(item, this.PURC_ORDER));
+
+        }
+
+    }
+
+    private static String formatDate(Date inputDate) {
+        Date effectiveDate = inputDate != null ? inputDate : Date.today();
+        return Datetime.newInstance(effectiveDate, Time.newInstance(0, 0, 0, 0)).format('dd.MM.yyyy');
+    }
+
+
+
+    public class PurchaseOrderLineItemWrapper {
+        public String MATERIAL;
+        public String TARGET_QTY;
+        public String PLANT;
+        public String ITEM_CATEG;
+        public String REMARKS;
+        public String SERIALNO;
+        public String PRIORITY;
+        public String PURCH_NO_S;
+        public String PO_DAT_S;
+        public String STLAL;
+        public String STORE_LOC;
+        public String ALTERNATE_PRODUCT_NAME;
+        public String ALTERNATE_PRODUCT_MODEL;
+
+    // Made changes added extra param & few fallback codnitions to below method - Nathan
+    public PurchaseOrderLineItemWrapper(Purchase_Order_Line_Item__c item, String purchOrder) {
+        String extIdRaw = item.MATERIAL__c;
+
+        this.MATERIAL = String.isNotBlank(item.MATERIAL__c)
+            ? item.MATERIAL__c
+            : (item.Product__r != null && String.isNotBlank(item.Product__r.Material_Code__c)
+                ? item.Product__r.Material_Code__c
+                : '');
+
+        this.TARGET_QTY   = item.Quantity__c != null              ? String.valueOf(item.Quantity__c) : '';
+        // this.PLANT        = String.isNotBlank(item.PLANT__c)      ? item.PLANT__c : 'TA02';
+        
+        this.PLANT = String.isNotBlank(item.PLANT__c)
+        ? item.PLANT__c
+        : (item.Product__r != null && String.isNotBlank(item.Product__r.PLANT__c)
+            ? item.Product__r.PLANT__c
+            : '');
+
+        this.ITEM_CATEG   = String.isNotBlank(item.ITEM_CATEG__c) ? item.ITEM_CATEG__c : '';
+        this.REMARKS      = String.isNotBlank(item.REMARKS__c)    ? item.REMARKS__c : '';
+        this.SERIALNO     = String.isNotBlank(item.SERIALNO__c)   ? item.SERIALNO__c : '';
+        this.PRIORITY     = String.isNotBlank(item.PRIORITY__c)   ? item.PRIORITY__c : '';
+
+        // Fixing the error here:
+        this.PURCH_NO_S   = String.isNotBlank(purchOrder)
+            ? purchOrder
+            : (String.isNotBlank(item.PURCH_NO_S__c) ? item.PURCH_NO_S__c : '');
+
+        this.PO_DAT_S     = formatDate(item.Purchase_Order_Date__c);
+        //this.STLAL        = '10';
+        this.STLAL = parentPOLIVsSTLAL.containsKey(item.Id)
+    ? parentPOLIVsSTLAL.get(item.Id)
+    : '';
+        
+         // the parent poli has Parent_POLI__c filed as blank can you add a pre processed map that has parent Id vs Alt bom seleted 
+       
+        this.STORE_LOC    = String.isNotBlank(item.STORE_LOC__c)  ? item.STORE_LOC__c : '';
+        this.ALTERNATE_PRODUCT_NAME    = String.isNotBlank(item.Alternate_Product_Name__c)  ? item.Alternate_Product_Name__c : '';
+        this.ALTERNATE_PRODUCT_MODEL    = String.isNotBlank(item.Alternate_Product_Model__c)  ? item.Alternate_Product_Model__c : '';
+    }
+
+    }
+}
