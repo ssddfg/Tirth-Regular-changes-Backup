@@ -1,0 +1,39 @@
+/*
+  @description       : Apex Class for Error in API Logs
+  @author            : Shashank Shekhar
+  @group             : 
+  @Created on        : 13-01-2025
+  
+*/
+
+public with sharing class ErrorLogs {
+
+    public static String response(String responseBody,String reqBody,Integer statusCode, String status,String className){
+
+        ErrorLog__c ErrorLog = new ErrorLog__c();
+        ErrorLog.Request_Body__c = reqBody;
+        ErrorLog.Response_Body__c = responseBody;
+        ErrorLog.Status__c = status;
+        ErrorLog.StatusCode__c = statusCode;
+        ErrorLog.class_Name__c = className;
+        insert ErrorLog;
+        return 'success';
+    }   
+	
+	/*
+  		@description       : Apex Method for conserving the error logs
+  		@author            : Rahul Saini
+  		@group             : 
+  		@Created on        : 13-01-2025
+  
+	*/
+    public static void exceptionHandler(String className, String methodName, String errorMessage, String lineNumber, String exceptionType){
+		ErrorLog__c ErrorLog = new ErrorLog__c();
+        ErrorLog.Class_Name__c = className;
+        ErrorLog.Method_Name__c = methodName;
+        ErrorLog.Error_Message__c = errorMessage;
+        ErrorLog.Line_Number__c = lineNumber;
+        ErrorLog.Error_Type__c = exceptionType;
+        insert ErrorLog;
+	}
+}
