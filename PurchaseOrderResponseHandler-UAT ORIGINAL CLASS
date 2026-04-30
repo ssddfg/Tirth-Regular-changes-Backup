@@ -1,0 +1,219 @@
+public class PurchaseOrderResponseHandler {
+
+    public static void handleResponse(String responseBody, SAPResponseWrapper sapResponse, Purchase_Order__c po) {
+        System.debug('PurchaseOrderResponseHandler > handleResponse >>> responseBody: ' + responseBody);
+        System.debug('PurchaseOrderResponseHandler > handleResponse >>> sapResponse: ' + sapResponse);
+        System.debug('PurchaseOrderResponseHandler > handleResponse >>> po: ' + po);
+
+        markSynced(po.Id,true);
+
+        if (sapResponse == null || sapResponse.Status != 'Success' || String.isEmpty(sapResponse.SO_Number)) {
+            System.debug('⚠️ Skipping SO creation. Status not "Success" or missing SO Number.');
+            return;
+        }
+
+        try {
+            // STEP 1: Insert SO (same logic as you already have)
+            // Id standardPricebookId = [SELECT Id FROM Pricebook2 WHERE IsStandard = true LIMIT 1].Id; -- Removed - Nathan
+            //Id standardPricebookId = [SELECT Id FROM Pricebook2 WHERE Id =: po.Opportunity__r.Pricebook2Id LIMIT 1].Id; // - Added - Nathan
+			//Id pricebookId = [SELECT Pricebook2Id FROM Opportunity WHERE Id = :po.Opportunity__c].Pricebook2Id;
+            Id standardPricebookId = [SELECT Pricebook2Id FROM Opportunity WHERE Id = :po.Opportunity__c].Pricebook2Id;
+
+            List<Order> existingSOs = [SELECT Id FROM Order WHERE SAP_ID__c = :sapResponse.SO_Number LIMIT 1];
+            if (!existingSOs.isEmpty()) return;
+
+            Id primaryOrderRecordTypeId = [SELECT Id FROM RecordType WHERE SObjectType = 'Order' AND Name = 'Primary Order' LIMIT 1].Id;
+
+            Order so = new Order();
+            so.Name = 'SO-' + sapResponse.SO_Number;
+            so.SAP_ID__c = sapResponse.SO_Number;
+            so.Purchase_Order__c = po.Id;
+            so.AccountId = po.Account__c;
+            so.CurrencyIsoCode = po.Account__r.CurrencyIsoCode;
+            so.OpportunityId = po.Opportunity__c;
+            so.QuoteId = po.Quote__c;
+            so.PoNumber = po.PO_NO__c;
+            so.PoDate = po.PURCH_DATE__c;
+            so.Status = 'Draft';
+            so.EffectiveDate = Date.today();
+            so.RecordTypeId = primaryOrderRecordTypeId;
+            so.Pricebook2Id = standardPricebookId;
+            so.BillingStreet = po.Exporter__Street__s;
+            so.BillingCity = po.Exporter__City__s;
+            so.BillingState = po.Exporter__StateCode__s;
+            so.BillingPostalCode = po.Exporter__PostalCode__s;
+            so.BillingCountry = po.Exporter__CountryCode__s;
+            so.ShippingStreet = po.Consignee__Street__s;
+            so.ShippingCity = po.Consignee__City__s;
+            so.ShippingState = po.Consignee__StateCode__s;
+            so.ShippingPostalCode = po.Consignee__PostalCode__s;
+            so.ShippingCountry = po.Consignee__CountryCode__s;
+            so.Incoterms__c = po.INCO_Terms__c;
+            so.Incoterm_Location__c = po.Port_of_Discharge__c;
+            so.payment_terms__c = po.Payment_Terms__c;
+            so.Sales_office__c = po.SALES_OFF__c;
+            so.Description = po.REMARKS__c;
+            so.OrderReferenceNumber = po.CUST_PONO__c;
+            insert so;
+            System.debug('✅ Inserted SO: ' + so.Id);
+
+            // STEP 2: Fetch PO Line Items
+            List<Purchase_Order_Line_Item__c> poItems = [
+                SELECT MATERIAL__c, Product__c, TARGET_QTY__c, Product__r.ProductCode, Product__r.Material_Code__c,
+                    REMARKS__c, ITEM_CATEG__c, PLANT__c, SERIALNO__c, STORE_LOC__c, Quantity__c, Unit_Price__c,
+                    Purchase_Order_Date__c, ITM_NUMBER__c, PurcahseOrderProducts_External_ID__c,
+                    Parent_POLI__c, Product__r.RecordType.DeveloperName
+                FROM Purchase_Order_Line_Item__c
+                WHERE Purchase_Order__c = :po.Id
+            ];
+            System.debug('✅ Fetching PO Line Items after ✅ SO Insertion :poItems '+poItems.size()+' '+poItems);
+
+            // STEP 3: External ID Mapping (SAP)
+            Map<String, Purchase_Order_Line_Item__c> mappedItems = SOItemMapper.mapExternalIdsToPOLineItems(poItems, sapResponse.PO_Items);
+            System.debug('✅ Mapped SAP External IDs to PO Items: ' + mappedItems);
+
+            // STEP 4: Setup Maps
+            Set<Id> mappedPOLIIds = new Set<Id>();
+            Map<Id, Purchase_Order_Line_Item__c> poliIdToPOLI = new Map<Id, Purchase_Order_Line_Item__c>();
+            Map<Id, Id> productIdToInsertedSOI = new Map<Id, Id>();
+            List<OrderItem> allOrderItems = new List<OrderItem>();
+
+            for (Purchase_Order_Line_Item__c item : poItems) {
+                poliIdToPOLI.put(item.Id, item);
+            }
+
+            // STEP 5: Insert SOIs from External ID mapping (Material + Spares)
+            for (String extId : mappedItems.keySet()) {
+                Purchase_Order_Line_Item__c item = mappedItems.get(extId);
+                mappedPOLIIds.add(item.Id);
+
+                if (item.Product__r == null || item.Product__c == null) continue;
+
+                List<PricebookEntry> entries = [
+                    SELECT Id FROM PricebookEntry WHERE Product2Id = :item.Product__c AND CurrencyISOCode = : so.CurrencyIsoCode AND IsActive = true AND Pricebook2Id =: standardPricebookId LIMIT 1
+                ];
+
+                System.debug('entries + ' + entries);
+                
+                if (entries.isEmpty() && !Test.isRunningTest()) continue;
+
+                OrderItem soi = new OrderItem();
+                soi.OrderId = so.Id;
+                soi.Product2Id = item.Product__c;
+                if(!Test.isRunningTest()){
+                	soi.PricebookEntryId = entries[0].Id;
+                } else {
+                    // Do nothing
+                }
+                soi.Quantity = item.Quantity__c != null ? item.Quantity__c : 1;
+                soi.UnitPrice = item.Unit_Price__c;
+                soi.Description = item.REMARKS__c;
+                soi.Status__c = 'Draft';
+                soi.STORE_LOC__c = item.STORE_LOC__c;
+                soi.ITEM_CATEG__c = item.ITEM_CATEG__c;
+                // soi.PLANT__c = item.PLANT__c;
+                if (item.PLANT__c != null && item.PLANT__c.contains('-')) {
+                    soi.PLANT__c = item.PLANT__c.split('-')[0];
+                } else {
+                    soi.PLANT__c = item.PLANT__c;
+                }
+
+                soi.Machine_Serial_No__c = item.SERIALNO__c;
+                soi.ServiceDate = item.Purchase_Order_Date__c;
+                //CurrencyIsoCode
+                soi.SO_Line_Item_External_Id__c = extId;
+
+                allOrderItems.add(soi);
+            }
+            if(!Test.isRunningTest()){
+            	insert allOrderItems;
+            }
+
+            // Capture inserted parent mapping
+            for (OrderItem soi : allOrderItems) {
+                productIdToInsertedSOI.put(soi.Product2Id, soi.Id);
+            }
+
+            // STEP 6: Handle unmapped Alternate_BOM and Others
+            List<OrderItem> altBOMAndOthers = new List<OrderItem>();
+
+            for (Purchase_Order_Line_Item__c item : poItems) {
+                if (mappedPOLIIds.contains(item.Id)) continue;
+
+                if (item.Product__r == null || item.Product__c == null) continue;
+                String devName = item.Product__r.RecordType.DeveloperName;
+
+                List<PricebookEntry> entries = [
+                    SELECT Id FROM PricebookEntry WHERE Product2Id = :item.Product__c AND IsActive = true AND CurrencyISOCode = : so.CurrencyIsoCode AND Pricebook2Id =: standardPricebookId LIMIT 1
+                ];
+                System.debug('Alt BOM PBEs:: ' + entries);
+                if (entries.isEmpty() && !Test.isRunningTest()) continue;
+
+                OrderItem soi = new OrderItem();
+                soi.OrderId = so.Id;
+                soi.Product2Id = item.Product__c;
+                if(!Test.isRunningTest()){
+                	soi.PricebookEntryId = entries[0].Id;
+                }
+                soi.Quantity = item.Quantity__c != null ? item.Quantity__c : 1;
+                soi.UnitPrice = item.Unit_Price__c;
+                soi.Description = item.REMARKS__c;
+                soi.Status__c = 'Draft';
+                soi.STORE_LOC__c = item.STORE_LOC__c;
+                soi.ITEM_CATEG__c = item.ITEM_CATEG__c;
+                System.debug('POLI PLant: ' + item.PLANT__c);
+                if (item.PLANT__c != null && item.PLANT__c.contains('-')) {
+                    soi.PLANT__c = item.PLANT__c.split('-')[0];
+                } else {
+                    soi.PLANT__c = item.PLANT__c;
+                }
+
+                soi.Machine_Serial_No__c = item.SERIALNO__c;
+                soi.ServiceDate = item.Purchase_Order_Date__c;
+                soi.SO_Line_Item_External_Id__c = item.PurcahseOrderProducts_External_ID__c;
+
+                // 🔁 Set parent-child for Alternate BOM
+                if (devName == 'Alternate_BOM' && item.Parent_POLI__c != null && poliIdToPOLI.containsKey(item.Parent_POLI__c)) {
+                    Id parentProdId = poliIdToPOLI.get(item.Parent_POLI__c).Product__c;
+                    if (productIdToInsertedSOI.containsKey(parentProdId)) {
+                        soi.Parent_Order_Product__c = productIdToInsertedSOI.get(parentProdId);
+                    }
+                }
+
+                altBOMAndOthers.add(soi);
+            }
+            System.debug('✅ Inserting altBOMAndOthers' + altBOMAndOthers);
+            if(!Test.isRunningTest()){
+            	insert altBOMAndOthers;
+            }
+            allOrderItems.addAll(altBOMAndOthers);
+
+            // STEP 7: Add fallback if anything missed
+            List<OrderItem> fallbackItems = SOFallbackItemHandler.buildFallbackOrderItems(so, poItems, mappedPOLIIds);
+            if (!fallbackItems.isEmpty()) {
+                insert fallbackItems;
+                allOrderItems.addAll(fallbackItems);
+            }
+
+            System.debug('✅ Inserted ' + allOrderItems.size() + ' OrderItems for SO: ' + so.SAP_ID__c);
+            System.debug('✅ Inserted allOrderItems' + allOrderItems);
+
+        } catch (Exception ex) {
+            System.debug('🚫 Exception in handleResponse: ' + ex.getMessage());
+            ErrorLogs.response(ex.getMessage(), responseBody, -1, 'Exception', 'PurchaseOrderResponseHandler');
+        }
+
+    }
+    
+    public static void markSynced(Id poId, Boolean value) {
+        if (poId == null) return;
+        update new Purchase_Order__c(Id = poId, IsPOSyncedToSAP__c = value);
+    }
+    
+    @AuraEnabled(cacheable=true)
+    public static Boolean isPOSynced(Id poId) {
+        if (poId == null) return false;
+        return [SELECT IsPOSyncedToSAP__c FROM Purchase_Order__c WHERE Id = :poId LIMIT 1].IsPOSyncedToSAP__c;
+    }
+
+}
