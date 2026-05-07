@@ -1,0 +1,140 @@
+public with sharing class FetchInventoryInfoAPICallout {
+    private static final String SAP_API_ENDPOINT = 'https://sfqas.shaktiman.co.in:44301/zexp_dms/inventory?sap-client=100'; // Replace with actual endpoint
+   
+    /**
+     * @description       : Wrapper class for SAP Inventory response
+     * @author            : Nathan Fernandes
+     */
+    public class InventoryResponse {
+        public String model;
+        public String prodId;
+        public Integer quantity;
+        public String description;
+        
+        public InventoryResponse(String model, String prodId,  Integer quantity, String description) {
+            this.model = model;
+            this.prodId = prodId;
+            this.quantity = quantity;
+            this.description = description;
+        }
+    }
+
+    public static String getEndpointUrl(String apiName) {
+        SAP_API_Endpoint__mdt endpointConfig = [
+            SELECT Endpoint_URL__c 
+            FROM SAP_API_Endpoint__mdt 
+            WHERE DeveloperName = :apiName 
+            LIMIT 1
+        ];
+        return endpointConfig.Endpoint_URL__c;
+    }
+    
+    /**
+     * @description       : Fetch inventory details from SAP based on product codes of Quote Line Items
+     * @author            : Sireesha
+     * @return            : List<InventoryResponse>
+     * @param recordId    : Id of the Quote record
+     */
+    @AuraEnabled
+    public static String fetchInventoryFromSAP(String recordId) {
+        try {
+            List<InventoryResponse> responseData = new List<InventoryResponse>();
+            List<Product2> products = new List<Product2>();
+
+            String keyPrefix = recordId != null && recordId.length() >= 3 ? recordId.substring(0, 3) : '';
+            
+            if (keyPrefix == Quote.SObjectType.getDescribe().getKeyPrefix()) {
+                List<QuoteLineItem> qliList = [
+                    SELECT Product2.ProductCode, Product2.RecordType.DeveloperName,
+                        Product2.BOM_component__c, Product2.Material_Code__c
+                    FROM QuoteLineItem
+                    WHERE QuoteId = :recordId
+                ];
+                for (QuoteLineItem qli : qliList) {
+                    if (qli.Product2 != null) products.add(qli.Product2);
+                }
+
+            } else if (keyPrefix == Purchase_Order__c.SObjectType.getDescribe().getKeyPrefix()) {
+                List<Purchase_Order_Line_Item__c> poliList = [
+                    SELECT Product__r.ProductCode, Product__r.RecordType.DeveloperName,
+                        Product__r.BOM_component__c, Product__r.Material_Code__c
+                    FROM Purchase_Order_Line_Item__c
+                    WHERE Purchase_Order__c = :recordId
+                ];
+                for (Purchase_Order_Line_Item__c poli : poliList) {
+                    if (poli.Product__r != null) products.add(poli.Product__r);
+                }
+
+            } else {
+                return JSON.serialize(new Map<String, Object>{
+                    'status' => 'error',
+                    'message' => 'Unsupported record type for Id: ' + recordId
+                });
+            }
+
+            for (Product2 product : products) {
+                String materialCode;
+                if (product.RecordType.DeveloperName == 'Alternate_BOM') {
+                    materialCode = String.isNotBlank(product.Material_Code__c)
+                        ? product.Material_Code__c
+                        : product.BOM_component__c;
+                } else {
+                    materialCode = String.isNotBlank(product.Material_Code__c)
+                        ? product.Material_Code__c
+                        : product.ProductCode;
+                }
+
+                if (String.isBlank(materialCode)) continue;
+
+                String endpoint = getEndpointUrl('InventoryCheck');
+
+                HttpRequest request = new HttpRequest();
+                request.setEndpoint(endpoint);
+                request.setMethod('POST');
+                request.setHeader('Content-Type', 'application/json');
+                request.setBody('{"MATERIAL": "' + materialCode + '"}');
+
+                HttpResponse response = new Http().send(request);
+
+                if (response.getStatusCode() == 200 || response.getStatusCode() == 400) {
+                    Map<String, Object> responseMap = (Map<String, Object>) JSON.deserializeUntyped(response.getBody());
+
+                    if ((String) responseMap.get('Status') == 'Success') {
+                        responseData.add(new InventoryResponse(
+                            (String) responseMap.get('UOM'),
+                            (String) responseMap.get('Material Number'),
+                            (Integer) Decimal.valueOf((String) responseMap.get('Inventory Stock')),
+                            (String) responseMap.get('Material Description')
+                        ));
+                    } else {
+                        responseData.add(new InventoryResponse(
+                            'NA',
+                            (String) responseMap.get('Material Number'),
+                            0,
+                            (String) responseMap.get('Reason')
+                        ));
+                    }
+                } else {
+                    return JSON.serialize(new Map<String, Object>{
+                        'status' => 'error',
+                        'message' => 'SAP error: ' + response.getStatusCode() + ' - ' + response.getBody()
+                    });
+                }
+            }
+
+            return JSON.serialize(new Map<String, Object>{
+                'status' => 'success',
+                'data' => responseData
+            });
+
+        } catch (Exception e) {
+            return JSON.serialize(new Map<String, Object>{
+                'status' => 'error',
+                'message' => 'Exception: ' + e.getMessage()
+            });
+        }
+    }
+
+
+
+}
