@@ -1,0 +1,191 @@
+/**
+* @File Name : SOFallbackItemHandler.cls
+* @Description :
+* @Author :
+* @Last Modified By :
+* @Last Modified On : July 4, 2025
+* @Modification Log :
+*==============================================================================
+* Ver | Date | Author | Modification
+*==============================================================================
+* 1.0 | July 4, 2025 |   | Initial Version
+**/
+
+public class SOFallbackItemHandler {
+    /**
+     * Creates fallback OrderItems for PO Line Items that weren't mapped earlier.
+     * @param so - The Sales Order record
+     * @param poLineItems - All PO Line Items
+     * @param alreadyMappedItemIds - Set of PO Line Item IDs already used
+     * @return List of fallback OrderItems
+     */
+    public static List<OrderItem> buildFallbackOrderItems(
+        Order so,
+        List<Purchase_Order_Line_Item__c> poLineItems,
+        Set<Id> alreadyMappedItemIds
+    ) {
+        List<OrderItem> fallbackItems = new List<OrderItem>();
+
+        for (Purchase_Order_Line_Item__c poItem : poLineItems) {
+            if (alreadyMappedItemIds.contains(poItem.Id)) {
+                continue; // Skip already mapped
+            }
+
+            if (poItem.Product__r == null || poItem.Product__c == null) {
+                System.debug('⚠️ Fallback skipped: Product__c missing for PO Line Item ' + poItem.Id);
+                continue;
+            }
+
+            List<PricebookEntry> pricebookEntries = [
+                SELECT Id FROM PricebookEntry 
+                WHERE Product2Id = :poItem.Product__c AND IsActive = true 
+                LIMIT 1
+            ];
+
+            if (pricebookEntries.isEmpty()) {
+                System.debug('⚠️ Fallback skipped: No active PricebookEntry for product ' + poItem.Product__c);
+                continue;
+            }
+
+            OrderItem soi = new OrderItem();
+            soi.OrderId = so.Id;
+            soi.Product2Id = poItem.Product__c;
+            soi.PricebookEntryId = pricebookEntries[0].Id;
+            soi.Quantity = poItem.TARGET_QTY__c != null ? poItem.TARGET_QTY__c : 1;
+            soi.UnitPrice = 0;
+            soi.Description = poItem.REMARKS__c;
+            soi.Status__c = 'Draft';
+            soi.STORE_LOC__c = poItem.STORE_LOC__c;
+            soi.ITEM_CATEG__c = poItem.ITEM_CATEG__c;
+            soi.PLANT__c = poItem.PLANT__c;
+            soi.Machine_Serial_No__c = poItem.SERIALNO__c;
+            soi.ServiceDate = poItem.Purchase_Order_Date__c;
+            soi.SO_Line_Item_External_Id__c = null;
+
+            fallbackItems.add(soi);
+            System.debug('✅ Fallback OrderItem prepared for PO Line Item: ' + poItem.Id);
+        }
+
+        return fallbackItems;
+    }
+}
+
+
+/*************************TEST CLASS******************************************/
+
+@isTest
+private class SOFallbackItemHandlerTest {
+
+    static Id testProductId;
+    static Id testPBEId;
+    static Id testOrderId;
+    static List<Id> fallbackLineItemIds;
+
+    @testSetup
+    static void setupData() {
+        Id pricebookId = Test.getStandardPricebookId(); 
+       
+		Account acc = new Account(
+            Name = 'Test Account',
+            //Country_Regions_Key__c = c,
+            Region_State_Province_County__c = 'Maharashtra'
+        );
+        insert acc;
+        
+        // Create Product
+        Product2 prod = new Product2(Name = 'Test Product', IsActive = true);
+        insert prod;
+        testProductId = prod.Id;
+
+        // Create PricebookEntry
+        PricebookEntry pbe = new PricebookEntry(
+            Product2Id = testProductId,
+            Pricebook2Id = pricebookId,
+            UnitPrice = 100,
+            IsActive = true
+        );
+        insert pbe;
+        testPBEId = pbe.Id;
+
+        // Create Order
+        Order so = new Order(
+            Name = 'Test SO',
+            EffectiveDate = System.today(),
+            Status = 'Draft',
+            Pricebook2Id = pricebookId,
+            AccountId = acc.Id
+        );
+        insert so;
+        //testOrderId = so.Id;
+
+        // Create PO Line Items
+        fallbackLineItemIds = new List<Id>();
+        
+        Purchase_Order__c po = new Purchase_Order__c(
+            Exporter__Street__s = 'Street',
+            Exporter__City__s = 'City',
+            //Exporter__StateCode__s = 'ST',
+            Exporter__PostalCode__s = '123456',
+            Exporter__CountryCode__s = 'IN',
+            Consignee__Street__s = 'CStreet',
+            Consignee__City__s = 'CCity',
+            //Consignee__StateCode__s = 'CST',
+            Consignee__PostalCode__s = '654321',
+            Consignee__CountryCode__s = 'US',
+            Buyer__c = 'Test Buyer',
+            //Payment_Terms__c = '0006-Before 15 in 2 months Due net',
+            Port_of_Discharge__c = 'Mumbai',
+            Port_of_Loading__c = 'Chennai',
+            DESC_GOODS__c = 'Agri Goods',
+            TARGET_QTY__c = 10,
+            Country_of_Origin__c = 'India'
+        );
+        insert po;
+
+        List<Purchase_Order_Line_Item__c> poItems = new List<Purchase_Order_Line_Item__c>{
+            new Purchase_Order_Line_Item__c(
+                Product__c = testProductId,
+                Purchase_Order__c=po.Id,
+                TARGET_QTY__c = 10,
+                REMARKS__c = 'Fallback line item',
+                STORE_LOC__c = 'Loc1',
+                ITEM_CATEG__c = 'TypeA',
+                PLANT__c = 'PlantX',
+                SERIALNO__c = 'SN123',
+                Purchase_Order_Date__c = System.today()
+            ),
+            new Purchase_Order_Line_Item__c( // Will be marked as already mapped
+                Product__c = testProductId,
+                Purchase_Order__c=po.Id,
+                TARGET_QTY__c = 5,
+                REMARKS__c = 'Should be skipped'
+            )
+        };
+        insert poItems;
+
+        fallbackLineItemIds.add(poItems[0].Id); // only the first one should return fallback OrderItem
+    }
+
+    @isTest
+    static void testBuildFallbackOrderItems() {
+        List<Purchase_Order_Line_Item__c> poList = [
+            SELECT Id, Product__c, Product__r.Name, TARGET_QTY__c, REMARKS__c, 
+                   STORE_LOC__c, ITEM_CATEG__c, PLANT__c, SERIALNO__c, Purchase_Order_Date__c 
+            FROM Purchase_Order_Line_Item__c
+        ];
+
+        // Only mark one PO Line Item as already mapped
+        Set<Id> alreadyMapped = new Set<Id>{ poList[1].Id };
+
+        Order so = [SELECT Id FROM Order ];
+
+        Test.startTest();
+        List<OrderItem> fallbackItems = SOFallbackItemHandler.buildFallbackOrderItems(so, poList, alreadyMapped);
+        Test.stopTest();
+
+        System.assertEquals(1, fallbackItems.size(), 'Only one fallback OrderItem should be created');
+
+        OrderItem item = fallbackItems[0];
+        
+    }
+}
